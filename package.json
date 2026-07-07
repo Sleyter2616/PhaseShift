@@ -12,9 +12,15 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "seed:dev": "tsx scripts/seed-dev-user.ts",
+    "verify:phase1": "tsx scripts/verify-phase1.ts",
+    "resynth:check": "tsx scripts/resynth-check.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.110.0",
+    "@supabase/supabase-js": "^2.110.1",
+    "inngest": "^4.11.0",
     "next": "^15.3.3",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
@@ -31,6 +37,7 @@
     "prettier": "^3.5.3",
     "prettier-plugin-tailwindcss": "^0.6.12",
     "tailwindcss": "^4.1.10",
+    "tsx": "^4.23.0",
     "typescript": "^5.8.3",
     "vitest": "^3.2.4"
   }

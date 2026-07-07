@@ -83,3 +83,11 @@ Recorded ambiguities from `docs/blueprint.md` where the Phase 0 prompt or bluepr
 **Ambiguity:** §5 cost tables and the Flash-vs-Multilingual v2 fidelity gate assume a single vendor (ElevenLabs). Phase 0.1 introduces `tts_provider` enum and `PROVIDER_PRICING_USD_PER_1M_CHARS` with indicative per-provider ranges.
 
 **Proposed resolution:** §5 pricing tables become provider-conditional at Phase 2 implementation time. The fidelity gate expands to a multi-provider bake-off: same 90s voice sample, blind A/B across shortlisted providers (at minimum ElevenLabs Flash, ElevenLabs v2, and one cost leader), rating voice similarity, naturalness, and daily-usability before locking default `provider` on `scripts` and credit burn rates.
+
+---
+
+## §1.2B — Regen economics and byte-identical segment assumption (D8, Phase 1)
+
+**Ambiguity:** §1.2B assumes re-triangulation regen costs ~40% because unchanged segments hash-match and reuse `audio_files`. LLM recompilation does not guarantee byte-identical text for unchanged theta steps — wording drift breaks dedupe even when semantics are preserved.
+
+**Proposed resolution:** Introduce a compiler **regen mode** in v0.5 that accepts the prior manifest and emits unchanged steps verbatim (copy-through), with only edited steps recompiled. Phase 1 validates dedupe via idempotent re-synthesis (`resynth-check.ts`: 0 new `audio_files` rows on cache replay), not cross-compile stability.
