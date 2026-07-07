@@ -1,5 +1,7 @@
 import type { Intake } from "../contracts/intake";
 
+/** Golden fixtures intentionally contain no `<break>` SSML tags (intake layer only). */
+
 export const intake40Min: Intake = {
   goal_statement: "The senior engineer role at Meridian Labs is mine now.",
   localization: {

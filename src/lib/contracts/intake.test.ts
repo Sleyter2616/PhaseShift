@@ -3,6 +3,12 @@ import { intakeSchema, safeParseIntake } from "./intake";
 import { intake20Min, intake40Min, intakeInvalid } from "../fixtures/intake";
 
 describe("intakeSchema", () => {
+  it("golden fixtures contain no break tags", () => {
+    for (const fixture of [intake40Min, intake20Min]) {
+      expect(JSON.stringify(fixture).toLowerCase()).not.toContain("<break");
+    }
+  });
+
   it("accepts the 40-minute golden intake", () => {
     expect(() => intakeSchema.parse(intake40Min)).not.toThrow();
   });

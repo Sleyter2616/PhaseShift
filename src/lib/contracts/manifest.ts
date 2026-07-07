@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { findLooseBreakTags, parseBreakSeconds } from "../tts/break-tags";
+import { stripBreaks } from "../tts/breaks";
 
 const phaseEnum = z.enum(["beta", "alpha", "theta", "gamma", "delta"]);
 const perspectiveEnum = z.enum(["first", "second", "third"]);
@@ -53,22 +55,31 @@ const manifestSchema = z.object({
 export type Manifest = z.infer<typeof manifestSchema>;
 export type ManifestSegment = z.infer<typeof segmentSchema>;
 
-const BREAK_TAG_REGEX = /<break\s+time="(\d+(?:\.\d+)?)s"\s*\/>/gi;
 const PHASES = ["beta", "alpha", "theta", "gamma"] as const;
 
 function countWords(text: string): number {
-  const stripped = text.replace(BREAK_TAG_REGEX, " ");
-  const words = stripped.trim().split(/\s+/).filter(Boolean);
+  const { cleanText } = stripBreaks(text);
+  const words = cleanText.trim().split(/\s+/).filter(Boolean);
   return words.length;
 }
 
-function maxBreakSeconds(text: string): number {
-  let max = 0;
-  for (const match of text.matchAll(BREAK_TAG_REGEX)) {
-    const val = Number(match[1]);
-    if (!Number.isNaN(val) && val > max) max = val;
+function collectBreakErrors(segment: ManifestSegment): string[] {
+  const errors: string[] = [];
+
+  for (const tag of findLooseBreakTags(segment.text)) {
+    const seconds = parseBreakSeconds(tag);
+    if (seconds === null) {
+      errors.push(`segment seq ${segment.seq}: malformed break tag: ${tag}`);
+      continue;
+    }
+    if (seconds > 3.0) {
+      errors.push(
+        `segment seq ${segment.seq}: break tag exceeds 3.0s maximum (${seconds}s)`,
+      );
+    }
   }
-  return max;
+
+  return errors;
 }
 
 function collectRefinementErrors(manifest: Manifest): string[] {
@@ -86,12 +97,7 @@ function collectRefinementErrors(manifest: Manifest): string[] {
   }
 
   for (const segment of manifest.segments) {
-    const maxBreak = maxBreakSeconds(segment.text);
-    if (maxBreak > 3.0) {
-      errors.push(
-        `segment seq ${segment.seq}: break tag exceeds 3.0s maximum (${maxBreak}s)`,
-      );
-    }
+    errors.push(...collectBreakErrors(segment));
 
     const wordBudget = (segment.pacing_wpm * segment.target_duration_sec) / 60;
     const words = countWords(segment.text);

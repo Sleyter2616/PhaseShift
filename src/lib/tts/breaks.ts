@@ -1,4 +1,9 @@
-const BREAK_TAG_REGEX = /<break\s+time="(\d+(?:\.\d{1,2})?)s"\s*\/>/gi;
+import {
+  findLooseBreakTags,
+  isCanonicalBreakTag,
+  LOOSE_BREAK_REGEX,
+  parseBreakSeconds,
+} from "./break-tags";
 
 export interface StripBreaksResult {
   cleanText: string;
@@ -6,18 +11,26 @@ export interface StripBreaksResult {
 }
 
 /**
- * Removes valid `<break time="X.Xs"/>` tags and sums their durations in ms.
- * Malformed break-like tags are left in cleanText and ignored for timing.
+ * Removes every loose `<break ...>` fragment from cleanText so nothing break-like
+ * may ever reach TTS text. Credits totalBreakMs only for canonical
+ * `<break time="X.Xs"/>` tags (double quotes, 1–2 decimal places).
  */
 export function stripBreaks(text: string): StripBreaksResult {
   let totalBreakMs = 0;
-  const cleanText = text.replace(BREAK_TAG_REGEX, (_match, seconds: string) => {
-    const parsed = Number(seconds);
-    if (!Number.isNaN(parsed) && parsed >= 0) {
-      totalBreakMs += Math.round(parsed * 1000);
+
+  for (const tag of findLooseBreakTags(text)) {
+    const seconds = parseBreakSeconds(tag);
+    if (seconds !== null) {
+      totalBreakMs += Math.round(seconds * 1000);
     }
-    return "";
-  });
+  }
+
+  const cleanText = text.replace(
+    new RegExp(LOOSE_BREAK_REGEX.source, LOOSE_BREAK_REGEX.flags),
+    "",
+  );
 
   return { cleanText, totalBreakMs };
 }
+
+export { isCanonicalBreakTag, parseBreakSeconds };
