@@ -1,3 +1,5 @@
+import type { TtsProviderId } from "./tts/provider";
+
 /** §2.3 — Effective pacing (words per minute, silence included) */
 export const PACING_WPM = {
   beta: 130,
@@ -48,3 +50,17 @@ export const REGEN_PARTIAL_CHAR_THRESHOLD = 12_000;
 
 /** §5 — Top-up price reference */
 export const TOPUP_PRICE_PER_CREDIT_USD = 6;
+
+/** §5 — Indicative only; re-verify at Phase 2 implementation. */
+export const PROVIDER_PRICING_USD_PER_1M_CHARS: Record<
+  TtsProviderId,
+  { low: number; high: number; verifiedAt: string }
+> = {
+  elevenlabs: { low: 50, high: 120, verifiedAt: "2026-07" },
+  openai: { low: 15, high: 15, verifiedAt: "2026-07" },
+  google: { low: 4, high: 16, verifiedAt: "2026-07" },
+  amazon: { low: 4, high: 16, verifiedAt: "2026-07" },
+  inworld: { low: 5, high: 25, verifiedAt: "2026-07" },
+  minimax: { low: 60, high: 100, verifiedAt: "2026-07" },
+  selfhost: { low: 1, high: 1, verifiedAt: "2026-07" },
+};

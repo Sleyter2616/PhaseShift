@@ -1,6 +1,7 @@
 -- Source: docs/blueprint.md §1.4 (spend_credits SECURITY DEFINER function)
--- Blueprint + prompt version: Phase 0 repo genesis
+-- Blueprint + prompt version: Phase 0 repo genesis, Phase 0.1 provider-neutral voice layer
 -- Amendments applied: none
+-- Phase 0.1 note: no changes required — function references profiles/credit_ledger only.
 
 create or replace function spend_credits(p_script uuid, p_amount numeric, p_reason text default 'generation')
 returns void

@@ -1,3 +1,12 @@
+export type TtsProviderId =
+  | "elevenlabs"
+  | "openai"
+  | "google"
+  | "amazon"
+  | "inworld"
+  | "minimax"
+  | "selfhost";
+
 export interface SynthesisRequest {
   text: string;
   voiceId: string;
@@ -14,5 +23,7 @@ export interface SynthesisResult {
 }
 
 export interface TTSProvider {
+  readonly id: TtsProviderId;
+  readonly supportsInlineBreaks: boolean;
   synthesize(req: SynthesisRequest): Promise<SynthesisResult>;
 }

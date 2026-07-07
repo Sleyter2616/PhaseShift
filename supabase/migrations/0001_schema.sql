@@ -1,12 +1,14 @@
 -- Source: docs/blueprint.md §1.4 (Supabase schema DDL)
--- Blueprint + prompt version: Phase 0 repo genesis
--- Amendments applied: A2 (script_segments.user_id denormalized + index)
+-- Blueprint + prompt version: Phase 0 repo genesis, Phase 0.1 provider-neutral voice layer
+-- Amendments applied: A1 (dedupe scope), A2 (script_segments.user_id), A3 (dedupe provider),
+--   A4 (tts_provider enum, provider-neutral columns, voice_source_xor), A5 (break stripping in app layer)
 
 create type phase as enum ('beta','alpha','theta','gamma','delta');
 create type pl_perspective as enum ('first','second','third');
 create type horizon as enum ('introspective','retrospective','protospective');
 create type archetype as enum ('child','trickster','warrior','thief','magician','creator');
 create type audio_asset_scope as enum ('user','shared');
+create type tts_provider as enum ('elevenlabs','openai','google','amazon','inworld','minimax','selfhost');
 
 create table profiles (
   id uuid primary key references auth.users on delete cascade,
@@ -19,7 +21,8 @@ create table profiles (
 create table voice_profiles (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references profiles(id) on delete cascade,
-  elevenlabs_voice_id text,
+  provider tts_provider not null default 'elevenlabs',
+  provider_voice_id text,
   status text not null default 'pending' check (status in ('pending','ready','failed')),
   consent_confirmed_at timestamptz,
   created_at timestamptz default now()
@@ -55,7 +58,9 @@ create table scripts (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references profiles(id),
   goal_version_id uuid not null references goal_versions(id),
+  provider tts_provider not null default 'elevenlabs',
   voice_profile_id uuid references voice_profiles(id),
+  stock_voice_id text,
   llm_model text,
   prompt_version text,
   entrainment_mode text not null default 'isochronic'
@@ -64,19 +69,23 @@ create table scripts (
   status text not null default 'generating'
     check (status in ('generating','synthesizing','ready','failed')),
   total_duration_sec int,
-  created_at timestamptz default now()
+  created_at timestamptz default now(),
+  constraint voice_source_xor check (
+    (voice_profile_id is not null)::int + (stock_voice_id is not null)::int = 1
+  )
 );
 
 create table audio_files (
   id uuid primary key default gen_random_uuid(),
   user_id uuid references profiles(id),
   asset_scope audio_asset_scope not null default 'user',
+  provider tts_provider not null,
   dedupe_key text not null,
   storage_path text not null,
   duration_sec numeric,
   bytes int,
   format text default 'mp3',
-  elevenlabs_request_id text,
+  provider_request_id text,
   created_at timestamptz default now(),
   check (
     (asset_scope = 'user' and user_id is not null) or

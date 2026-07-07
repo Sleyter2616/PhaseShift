@@ -8,7 +8,7 @@ Recorded ambiguities from `docs/blueprint.md` where the Phase 0 prompt or bluepr
 
 **Ambiguity:** §1.2B defines `dedupe_key = sha256(elevenlabs_voice_id | model_id | voice_settings_json | segment_text)` without `asset_scope`. §1.4 DDL comment says `sha256(scope|voice|model|settings|text)`.
 
-**Resolution (Amendment A1, applied in code):** Include `asset_scope` as the first pipe-delimited field. Phase 0 `src/lib/tts/dedupe.ts` implements A1.
+**Resolution (Amendments A1 + A3, applied in code):** Include `asset_scope` and `provider` as pipe-delimited fields. Phase 0.1 `src/lib/tts/dedupe.ts` implements A3 (`provider|asset_scope|voice_id|model_id|settings|text`).
 
 ---
 
@@ -75,3 +75,11 @@ Recorded ambiguities from `docs/blueprint.md` where the Phase 0 prompt or bluepr
 **Ambiguity:** §5 uses "13,500 credits" for a Flash generation while §2.3 cites "~27,000 billable characters" — the numeric coincidence suggests credits may be 1:1 with characters for Flash, but this is not stated explicitly.
 
 **Proposed resolution:** Document in Phase 1 pricing module that 1 generation credit = up to 30k billable chars on Flash; v2 costs 2 credits. Constants in `costs.ts` preserve blueprint numbers as-is pending fidelity gate.
+
+---
+
+## §5 — Provider-conditional pricing and multi-provider fidelity gate (Phase 0.1)
+
+**Ambiguity:** §5 cost tables and the Flash-vs-Multilingual v2 fidelity gate assume a single vendor (ElevenLabs). Phase 0.1 introduces `tts_provider` enum and `PROVIDER_PRICING_USD_PER_1M_CHARS` with indicative per-provider ranges.
+
+**Proposed resolution:** §5 pricing tables become provider-conditional at Phase 2 implementation time. The fidelity gate expands to a multi-provider bake-off: same 90s voice sample, blind A/B across shortlisted providers (at minimum ElevenLabs Flash, ElevenLabs v2, and one cost leader), rating voice similarity, naturalness, and daily-usability before locking default `provider` on `scripts` and credit burn rates.

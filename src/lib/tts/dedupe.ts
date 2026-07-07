@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
+import type { TtsProviderId } from "./provider";
 
 export type AssetScope = "user" | "shared";
 
 export interface DedupeKeyInput {
+  provider: TtsProviderId;
   assetScope: AssetScope;
   voiceId: string;
   modelId: string;
@@ -22,11 +24,11 @@ export function canonicalizeSettings(settings: Record<string, unknown>): string 
 }
 
 /**
- * dedupe_key = sha256(`${asset_scope}|${voice_id}|${model_id}|${canonical_settings_json}|${text}`)
- * Amendment A1: scope included per §1.4 DDL comment.
+ * dedupe_key = sha256(`${provider}|${asset_scope}|${voice_id}|${model_id}|${canonical_settings_json}|${text}`)
+ * Amendments A1 (asset_scope) + A3 (provider).
  */
 export function dedupeKey(input: DedupeKeyInput): string {
   const canonical = canonicalizeSettings(input.settings);
-  const payload = `${input.assetScope}|${input.voiceId}|${input.modelId}|${canonical}|${input.text}`;
+  const payload = `${input.provider}|${input.assetScope}|${input.voiceId}|${input.modelId}|${canonical}|${input.text}`;
   return createHash("sha256").update(payload, "utf8").digest("hex");
 }

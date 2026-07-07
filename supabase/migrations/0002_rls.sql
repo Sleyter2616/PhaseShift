@@ -1,6 +1,8 @@
 -- Source: docs/blueprint.md §1.4 (RLS strategy)
--- Blueprint + prompt version: Phase 0 repo genesis
+-- Blueprint + prompt version: Phase 0 repo genesis, Phase 0.1 provider-neutral voice layer
 -- Amendments applied: A2 (script_segments flat owner check via user_id)
+-- Phase 0.1 note: no changes required — policies reference user_id / asset_scope only,
+--   not columns renamed in A4 (provider_voice_id, provider_request_id, etc.).
 
 alter table profiles enable row level security;
 alter table voice_profiles enable row level security;
