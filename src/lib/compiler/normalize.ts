@@ -47,8 +47,7 @@ function chainLongBreaksInText(text: string, seq: number, actions: string[]): st
 }
 
 function partsLabel(chained: string): string {
-  const matches = [...chained.matchAll(/time="([^"]+)"/g)].map((m) => `${m[1]}s`);
-  return matches.join(" + ");
+  return [...chained.matchAll(/time="([^"]+)"/g)].map((m) => m[1]).join(" + ");
 }
 
 function rescalePhaseDurations(
@@ -76,20 +75,22 @@ function rescalePhaseDurations(
   );
   longest.target_duration_sec = Math.max(1, longest.target_duration_sec + drift);
 
+  const changes: string[] = [];
+
   for (let i = 0; i < segments.length; i++) {
     const before = segments[i]!.target_duration_sec;
     const after = scaled[i]!.target_duration_sec;
     segments[i]!.target_duration_sec = after;
     if (before !== after) {
-      actions.push(
-        `phase ${phase}: rescaled segment seq ${segments[i]!.seq} target_duration_sec ${before} -> ${after}`,
-      );
+      changes.push(`seq ${segments[i]!.seq} ${before}->${after}`);
     }
   }
 
-  actions.push(
-    `phase ${phase}: rescaled segment targets ${sum} -> ${budget} (within 5% tolerance)`,
-  );
+  if (changes.length > 0) {
+    actions.push(
+      `phase ${phase}: rescaled segment targets ${sum} -> ${budget} (${changes.join(", ")})`,
+    );
+  }
 }
 
 export function normalizeManifest(json: unknown): NormalizeResult {

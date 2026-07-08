@@ -99,3 +99,13 @@ Recorded ambiguities from `docs/blueprint.md` where the Phase 0 prompt or bluepr
 **Ambiguity:** Blueprint §2.2 tells the model to emit JSON "matching the provided schema" but the v1 system prompt never embeds the §2.1 manifest contract. Models invent non-conforming shapes (`segment_id`, nested `meta.session`, etc.).
 
 **Resolution (applied in `prompt.v1.1`):** `COMPILER_PROMPT_V1_1` appends an explicit `## OUTPUT SCHEMA (exact, mandatory)` section before SELF-CHECK, mirroring the §2.1 Zod contract field names. `prompt.v1.ts` remains immutable; active `PROMPT_VERSION` is `v1.1`.
+
+---
+
+## §2.2 / §2.3 / §6 — Short-preset word budgets vs. verbatim content (D9, Phase 1.4)
+
+**Ambiguity:** §2.2 step weights × per-segment word budgets under-provision theta steps on short presets (20 min): mandated verbatim intake strings (goal, localization, triangulation, features, sync_actions, not_list) do not scale down with duration, yet step weights still require all twelve theta steps. Hard word ceilings and exact `target_duration_sec` sums are jointly unsatisfiable on short presets.
+
+**Resolution (applied in Phase 1.4):** Word-budget checks move from hard validation to advisory `warnings` on `validateManifest`; post-synthesis reconciliation (§2.3, D9) is the duration authority. **v0 ships 40-minute sessions only** (§6); short-preset support is deferred.
+
+**Scheduled resolution (compiler v2):** Server-owned segment skeleton — server computes all `target_duration_sec` values from the step-weight table; the model emits text per slot only. This also enables the D8 regen mode (copy-through unchanged steps verbatim).

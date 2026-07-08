@@ -66,6 +66,9 @@ describe("validateManifest", () => {
 
     const result = validateManifest({ ...baseManifest, segments });
     expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.warnings).toEqual([]);
+    }
   });
 
   it("returns formatted errors when phase budgets do not sum", () => {
@@ -110,7 +113,7 @@ describe("validateManifest", () => {
     }
   });
 
-  it("allows word count up to 115% of budget but rejects above", () => {
+  it("emits word-budget warnings above 115% but does not hard-fail", () => {
     const segments = [
       {
         seq: 1,
@@ -154,6 +157,9 @@ describe("validateManifest", () => {
       ),
     });
     expect(within.ok).toBe(true);
+    if (within.ok) {
+      expect(within.warnings).toEqual([]);
+    }
 
     const over = validateManifest({
       ...baseManifest,
@@ -161,9 +167,11 @@ describe("validateManifest", () => {
         segment.seq === 1 ? { ...segment, text: overText } : segment,
       ),
     });
-    expect(over.ok).toBe(false);
-    if (!over.ok) {
-      expect(over.errors.some((e) => e.includes("115%"))).toBe(true);
+    expect(over.ok).toBe(true);
+    if (over.ok) {
+      expect(over.warnings).toHaveLength(1);
+      expect(over.warnings[0]).toMatch(/^word-budget:/);
+      expect(over.warnings[0]).toContain("115%");
     }
   });
 });

@@ -1,6 +1,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { createClient } from "@supabase/supabase-js";
+import { collectWordBudgetWarnings } from "../src/lib/contracts/manifest";
 import { PHASES } from "../src/lib/schedule/reconcile";
 
 function loadEnvLocal(): void {
@@ -152,6 +153,12 @@ async function main() {
   console.log(
     `WARN banned tokens in theta text: ${bannedMatches.length}${bannedMatches.length ? ` (${[...new Set(bannedMatches.map((m) => m.toLowerCase()))].join(", ")})` : ""}`,
   );
+
+  const wordBudgetWarnings = collectWordBudgetWarnings(segs);
+  console.log(`WARN word-budget: ${wordBudgetWarnings.length} segment(s) exceed advisory ceiling`);
+  for (const warning of wordBudgetWarnings) {
+    console.log(`WARN ${warning}`);
+  }
 
   const dedupeKeys = [...new Set(segs.map((s) => s.content_hash))];
   const { count: audioCount } = await supabase

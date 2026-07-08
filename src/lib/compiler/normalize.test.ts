@@ -42,6 +42,8 @@ describe("normalizeManifest", () => {
       'Hold. <break time="3.0s"/><break time="3.0s"/><break time="2.0s"/> Continue.',
     );
     expect(actions.some((a) => a.includes("chained"))).toBe(true);
+    expect(actions.some((a) => a.includes("3.0ss"))).toBe(false);
+    expect(actions.some((a) => a.includes("3.0s + 3.0s + 2.0s"))).toBe(true);
   });
 
   it("rescales phase targets within 5% to sum exactly to budget", () => {
@@ -72,7 +74,7 @@ describe("normalizeManifest", () => {
     const segments = (manifest as { segments: Array<{ target_duration_sec: number }> }).segments;
     const sum = segments.reduce((acc, s) => acc + s.target_duration_sec, 0);
     expect(sum).toBe(60);
-    expect(actions.some((a) => a.includes("rescaled"))).toBe(true);
+    expect(actions.filter((a) => a.includes("rescaled"))).toHaveLength(1);
   });
 
   it("leaves phase targets untouched when deviation exceeds 5%", () => {

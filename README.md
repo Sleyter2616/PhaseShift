@@ -67,10 +67,10 @@ npx inngest-cli@latest dev -u http://localhost:3000/api/inngest
 curl -s -X POST http://localhost:3000/api/scripts \
   -H "Content-Type: application/json" \
   -H "x-dev-secret: $DEV_API_SECRET" \
-  -d @- <<'EOF'
-<paste 20-min golden intake JSON from src/lib/fixtures/intake.ts — intake20Min>
-EOF
+  -d "$(pnpm tsx -e "import { intake40Min } from './src/lib/fixtures/intake.ts'; process.stdout.write(JSON.stringify(intake40Min))")"
 ```
+
+v0 ships the **40-minute** golden path (`intake40Min` in `src/lib/fixtures/intake.ts`). The 20-minute fixture remains for unit tests only.
 
 Expect `202` with `{ "script_id": "..." }`.
 

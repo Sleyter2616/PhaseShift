@@ -10,6 +10,7 @@ export type CompileMessageClient = Pick<Anthropic, "messages">;
 export interface CompileAttemptInfo {
   attempt: number;
   validationErrors: string[];
+  validationWarnings: string[];
   normalizeActions: string[];
 }
 
@@ -33,7 +34,7 @@ export function formatCompilerFailureMessage(error: CompilerError): string {
 }
 
 const RETRY_SUFFIX =
-  "\n\nRe-emit ONLY the corrected JSON object. No explanation. No word counts.";
+  "\n\nRe-emit ONLY the corrected JSON object. No explanation. No word counts.\nWhen fixing text-level errors, do not change any target_duration_sec value or the segment structure.";
 
 function logCompileAttempt(
   attempt: number,
@@ -88,7 +89,12 @@ export async function compileManifest(
       parsed = JSON.parse(stripCodeFences(text));
     } catch {
       lastErrors = ["response was not valid JSON"];
-      const attemptInfo = { attempt: attempt + 1, validationErrors: lastErrors, normalizeActions };
+      const attemptInfo = {
+        attempt: attempt + 1,
+        validationErrors: lastErrors,
+        validationWarnings: [],
+        normalizeActions,
+      };
       attempts.push(attemptInfo);
       options?.onAttempt?.(attemptInfo);
       if (attempt === 1) break;
@@ -104,12 +110,21 @@ export async function compileManifest(
 
     const result = validateManifest(normalized.manifest);
     if (result.ok) {
+      for (const warning of result.warnings) {
+        console.error(`validate: ${warning}`);
+      }
+
       if (result.data.meta.goal_version_id !== compilerInput.goal_version_id) {
         lastErrors = [
           `meta.goal_version_id mismatch: expected ${compilerInput.goal_version_id}, got ${result.data.meta.goal_version_id}`,
         ];
       } else {
-        const attemptInfo = { attempt: attempt + 1, validationErrors: [], normalizeActions };
+        const attemptInfo = {
+          attempt: attempt + 1,
+          validationErrors: [],
+          validationWarnings: result.warnings,
+          normalizeActions,
+        };
         attempts.push(attemptInfo);
         options?.onAttempt?.(attemptInfo);
         return result.data;
@@ -118,7 +133,12 @@ export async function compileManifest(
       lastErrors = result.errors;
     }
 
-    const attemptInfo = { attempt: attempt + 1, validationErrors: lastErrors, normalizeActions };
+    const attemptInfo = {
+      attempt: attempt + 1,
+      validationErrors: lastErrors,
+      validationWarnings: [],
+      normalizeActions,
+    };
     attempts.push(attemptInfo);
     options?.onAttempt?.(attemptInfo);
 

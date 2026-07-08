@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { CompilerError, compileManifest } from "../src/lib/compiler/compile";
 import { stripBreaks } from "../src/lib/tts/breaks";
 import { PHASES } from "../src/lib/schedule/reconcile";
-import { intake20Min } from "../src/lib/fixtures/intake";
+import { intake40Min } from "../src/lib/fixtures/intake";
 import { buildCompilerInput } from "../src/lib/session/derive";
 
 const GOAL_VERSION_ID = "550e8400-e29b-41d4-a716-446655440000";
@@ -30,15 +30,19 @@ function countWords(text: string): number {
 async function main() {
   loadEnvLocal();
 
-  const input = buildCompilerInput(intake20Min, GOAL_VERSION_ID);
+  const input = buildCompilerInput(intake40Min, GOAL_VERSION_ID);
 
   try {
     const manifest = await compileManifest(input, {
-      onAttempt: ({ attempt, validationErrors, normalizeActions }) => {
+      onAttempt: ({ attempt, validationErrors, validationWarnings, normalizeActions }) => {
         console.error(`--- attempt ${attempt} ---`);
         if (normalizeActions.length > 0) {
           console.error("normalization:");
           for (const action of normalizeActions) console.error(`  ${action}`);
+        }
+        if (validationWarnings.length > 0) {
+          console.error("validation warnings:");
+          for (const warning of validationWarnings) console.error(`  ${warning}`);
         }
         if (validationErrors.length > 0) {
           console.error("validation errors:");
@@ -70,6 +74,10 @@ async function main() {
           if (attempt.normalizeActions.length > 0) {
             console.error("normalization:");
             for (const action of attempt.normalizeActions) console.error(`  ${action}`);
+          }
+          if (attempt.validationWarnings.length > 0) {
+            console.error("validation warnings:");
+            for (const warning of attempt.validationWarnings) console.error(`  ${warning}`);
           }
           if (attempt.validationErrors.length > 0) {
             console.error("validation errors:");
