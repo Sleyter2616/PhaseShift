@@ -2,6 +2,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { applyDedupeHits, planSegmentDedupe } from "../src/lib/pipeline/dedupe-plan";
+import { resynthPreconditionError } from "../src/lib/pipeline/resynth-guard";
 import { runSynthesizeSegment } from "../src/lib/pipeline/synthesize-segment-job";
 
 function loadEnvLocal(): void {
@@ -39,7 +40,7 @@ async function main() {
 
   const { data: script } = await supabase
     .from("scripts")
-    .select("id, user_id")
+    .select("id, user_id, status")
     .eq("id", scriptId)
     .single();
 
@@ -53,6 +54,12 @@ async function main() {
     .select("id, content_hash, text, pacing_wpm")
     .eq("script_id", scriptId)
     .order("seq");
+
+  const preconditionError = resynthPreconditionError(script.status, (segments ?? []).length);
+  if (preconditionError) {
+    console.log(preconditionError);
+    process.exit(1);
+  }
 
   const dedupeKeys = [...new Set((segments ?? []).map((s) => s.content_hash))];
 

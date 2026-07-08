@@ -91,3 +91,11 @@ Recorded ambiguities from `docs/blueprint.md` where the Phase 0 prompt or bluepr
 **Ambiguity:** §1.2B assumes re-triangulation regen costs ~40% because unchanged segments hash-match and reuse `audio_files`. LLM recompilation does not guarantee byte-identical text for unchanged theta steps — wording drift breaks dedupe even when semantics are preserved.
 
 **Proposed resolution:** Introduce a compiler **regen mode** in v0.5 that accepts the prior manifest and emits unchanged steps verbatim (copy-through), with only edited steps recompiled. Phase 1 validates dedupe via idempotent re-synthesis (`resynth-check.ts`: 0 new `audio_files` rows on cache replay), not cross-compile stability.
+
+---
+
+## §2.2 — System prompt references schema never provided (erratum, Phase 1.2)
+
+**Ambiguity:** Blueprint §2.2 tells the model to emit JSON "matching the provided schema" but the v1 system prompt never embeds the §2.1 manifest contract. Models invent non-conforming shapes (`segment_id`, nested `meta.session`, etc.).
+
+**Resolution (applied in `prompt.v1.1`):** `COMPILER_PROMPT_V1_1` appends an explicit `## OUTPUT SCHEMA (exact, mandatory)` section before SELF-CHECK, mirroring the §2.1 Zod contract field names. `prompt.v1.ts` remains immutable; active `PROMPT_VERSION` is `v1.1`.

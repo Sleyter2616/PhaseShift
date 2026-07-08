@@ -1,5 +1,10 @@
+import { NonRetriableError } from "inngest";
 import { inngest } from "../client";
-import { CompilerError, compileManifest } from "@/lib/compiler/compile";
+import {
+  CompilerError,
+  compileManifest,
+  formatCompilerFailureMessage,
+} from "@/lib/compiler/compile";
 import { getServiceClient } from "@/lib/db/service-client";
 import { applyDedupeHits, planSegmentDedupe } from "@/lib/pipeline/dedupe-plan";
 import { deriveSegmentRows } from "@/lib/pipeline/segment-rows";
@@ -16,7 +21,11 @@ async function markScriptFailed(scriptId: string, message: string): Promise<void
 }
 
 export const generateScript = inngest.createFunction(
-  { id: "generate-script", triggers: [{ event: "script/generate.requested" }] },
+  {
+    id: "generate-script",
+    retries: 1,
+    triggers: [{ event: "script/generate.requested" }],
+  },
   async ({ event, step }) => {
     const scriptId = event.data.script_id;
 
@@ -43,7 +52,15 @@ export const generateScript = inngest.createFunction(
       });
 
       const manifest = await step.run("compile", async () => {
-        return compileManifest(scriptCtx.compiler_input);
+        try {
+          return await compileManifest(scriptCtx.compiler_input);
+        } catch (error) {
+          if (error instanceof CompilerError) {
+            await markScriptFailed(scriptId, formatCompilerFailureMessage(error));
+            throw new NonRetriableError(formatCompilerFailureMessage(error));
+          }
+          throw error;
+        }
       });
 
       await step.run("persist-segments", async () => {
@@ -167,7 +184,7 @@ export const generateScript = inngest.createFunction(
     } catch (error) {
       const message =
         error instanceof CompilerError
-          ? `${error.message}${error.validationErrors ? `: ${error.validationErrors.join("; ")}` : ""}`
+          ? formatCompilerFailureMessage(error)
           : error instanceof Error
             ? error.message
             : "unknown error";
