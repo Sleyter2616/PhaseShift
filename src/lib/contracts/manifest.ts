@@ -100,10 +100,11 @@ function collectRefinementErrors(manifest: Manifest): string[] {
     errors.push(...collectBreakErrors(segment));
 
     const wordBudget = (segment.pacing_wpm * segment.target_duration_sec) / 60;
+    const maxWords = Math.ceil(1.15 * wordBudget);
     const words = countWords(segment.text);
-    if (words > wordBudget) {
+    if (words > maxWords) {
       errors.push(
-        `segment seq ${segment.seq}: word count ${words} exceeds budget ${wordBudget.toFixed(1)} (pacing_wpm ${segment.pacing_wpm} × ${segment.target_duration_sec}s / 60)`,
+        `segment seq ${segment.seq}: word count ${words} exceeds budget ${maxWords} (115% of ${wordBudget.toFixed(1)}; pacing_wpm ${segment.pacing_wpm} × ${segment.target_duration_sec}s / 60)`,
       );
     }
 

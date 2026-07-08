@@ -33,7 +33,19 @@ async function main() {
   const input = buildCompilerInput(intake20Min, GOAL_VERSION_ID);
 
   try {
-    const manifest = await compileManifest(input);
+    const manifest = await compileManifest(input, {
+      onAttempt: ({ attempt, validationErrors, normalizeActions }) => {
+        console.error(`--- attempt ${attempt} ---`);
+        if (normalizeActions.length > 0) {
+          console.error("normalization:");
+          for (const action of normalizeActions) console.error(`  ${action}`);
+        }
+        if (validationErrors.length > 0) {
+          console.error("validation errors:");
+          for (const error of validationErrors) console.error(`  ${error}`);
+        }
+      },
+    });
     const phaseBudget = input.session.phase_budget_sec;
 
     console.log(`segments: ${manifest.segments.length}`);
@@ -52,8 +64,22 @@ async function main() {
     process.exit(0);
   } catch (error) {
     if (error instanceof CompilerError) {
-      for (const line of error.validationErrors ?? []) {
-        console.error(line);
+      if (error.attempts) {
+        for (const attempt of error.attempts) {
+          console.error(`--- attempt ${attempt.attempt} ---`);
+          if (attempt.normalizeActions.length > 0) {
+            console.error("normalization:");
+            for (const action of attempt.normalizeActions) console.error(`  ${action}`);
+          }
+          if (attempt.validationErrors.length > 0) {
+            console.error("validation errors:");
+            for (const line of attempt.validationErrors) console.error(`  ${line}`);
+          }
+        }
+      } else {
+        for (const line of error.validationErrors ?? []) {
+          console.error(line);
+        }
       }
       if (error.rawResponse) {
         console.error("--- rawResponse ---");
