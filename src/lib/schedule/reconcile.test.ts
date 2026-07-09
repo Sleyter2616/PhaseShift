@@ -25,7 +25,7 @@ describe("reconcilePhaseTiming", () => {
     expect(result.overBudgetPhases).toEqual([]);
   });
 
-  it("uses even-gap fallback when raw pauses are zero", () => {
+  it("distributes fallback silence across all segments including the last", () => {
     const result = reconcilePhaseTiming({
       phaseBudgetSec: { beta: 10, alpha: 0, theta: 0, gamma: 0 },
       segments: [
@@ -36,12 +36,30 @@ describe("reconcilePhaseTiming", () => {
     });
 
     const beta = result.segments.filter((s) => s.phase === "beta");
-    expect(beta[0]?.scheduled_pause_after_ms).toBe(2000);
-    expect(beta[1]?.scheduled_pause_after_ms).toBe(2000);
-    expect(beta[2]?.scheduled_pause_after_ms).toBe(0);
+    expect(beta[0]?.scheduled_pause_after_ms).toBe(1333);
+    expect(beta[1]?.scheduled_pause_after_ms).toBe(1333);
+    expect(beta[2]?.scheduled_pause_after_ms).toBe(1334);
+
+    const totalPauseMs = beta.reduce((sum, s) => sum + (s.scheduled_pause_after_ms ?? 0), 0);
+    expect(totalPauseMs).toBe(4000);
   });
 
-  it("assigns zero scheduled pause to the last segment in a phase", () => {
+  it("closes a single-segment phase exactly with trailing silence on the last segment", () => {
+    const result = reconcilePhaseTiming({
+      phaseBudgetSec: { beta: 120, alpha: 0, theta: 0, gamma: 0 },
+      segments: [{ phase: "beta", pause_after_ms: 0, actual_duration_sec: 75 }],
+    });
+
+    const beta = result.segments.filter((s) => s.phase === "beta");
+    expect(beta).toHaveLength(1);
+    expect(beta[0]?.scheduled_pause_after_ms).toBe(45_000);
+
+    const voicedSec = 75;
+    const pauseSec = (beta[0]?.scheduled_pause_after_ms ?? 0) / 1000;
+    expect(voicedSec + pauseSec).toBe(120);
+  });
+
+  it("puts fallback rounding drift on the last segment", () => {
     const result = reconcilePhaseTiming({
       phaseBudgetSec: { beta: 0, alpha: 12, theta: 0, gamma: 0 },
       segments: [
@@ -51,8 +69,11 @@ describe("reconcilePhaseTiming", () => {
     });
 
     const alpha = result.segments.filter((s) => s.phase === "alpha");
-    expect(alpha.at(-1)?.scheduled_pause_after_ms).toBe(0);
-    expect(alpha[0]?.scheduled_pause_after_ms).toBe(4000);
+    expect(alpha[0]?.scheduled_pause_after_ms).toBe(2000);
+    expect(alpha[1]?.scheduled_pause_after_ms).toBe(2000);
+
+    const totalPauseMs = alpha.reduce((sum, s) => sum + (s.scheduled_pause_after_ms ?? 0), 0);
+    expect(totalPauseMs).toBe(4000);
   });
 
   it("flags phases where voiced seconds exceed budget by more than 2%", () => {

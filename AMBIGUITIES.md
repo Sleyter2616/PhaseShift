@@ -112,8 +112,16 @@ Recorded ambiguities from `docs/blueprint.md` where the Phase 0 prompt or bluepr
 
 ---
 
-## §2.3 — Trailing silence dropped when segments carry no raw pause (Phase 1.5)
+## §2.3 — Trailing silence dropped when segments carry no raw pause (Phase 1.5 → fixed Phase 2.1, D13)
 
-**Ambiguity:** Reconciliation (§2.3) distributes phase remainder across `pause_after_ms` slots. Phases whose segments all carry `pause_after_ms = 0` have no raw pause budget to stretch, so trailing silence is dropped entirely (observed on beta: ~79s voiced vs 120s budget, 0ms scheduled pause on the last segment).
+**Ambiguity:** Reconciliation (§2.3) fallback distributed phase remainder across `segments.length - 1` gaps, zeroing the last segment's pause. Phases whose segments all carry `pause_after_ms = 0` therefore dropped trailing silence (observed on beta: ~75s voiced vs 120s budget, 0ms scheduled pause on the last segment).
 
-**Resolution (Phase 1.5):** Acceptable for v0 — post-synthesis reconciliation remains the duration authority and shortfall is absorbed as unvoiced gap. Scheduled fix in v0.5 server-owned segment skeleton: server pre-allocates `pause_after_ms` per slot from the step-weight table so every phase has distributable silence.
+**Resolution (applied in Phase 2.1, D13):** Fallback branch now distributes `remainingMs` evenly across **all** segments including the last; rounding drift lands on the final segment so each phase closes exactly. `scripts/re-reconcile.ts` rewrites pause scheduling on existing rows without re-synthesis.
+
+---
+
+## §2.3 — Gamma long-silence quality risk (Phase 2.1)
+
+**Ambiguity:** Underwritten gamma text combined with pause stretching can produce ~2-minute gaps in the high-energy exit phase (quality smell, not a hard failure).
+
+**Proposed resolution:** Defer to Phase 3 first-listen review. Candidates if unacceptable: per-phase `scheduled_pause_after_ms` caps, or the v0.5 server-owned segment skeleton with pre-allocated pause slots.
