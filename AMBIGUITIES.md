@@ -109,3 +109,11 @@ Recorded ambiguities from `docs/blueprint.md` where the Phase 0 prompt or bluepr
 **Resolution (applied in Phase 1.4):** Word-budget checks move from hard validation to advisory `warnings` on `validateManifest`; post-synthesis reconciliation (§2.3, D9) is the duration authority. **v0 ships 40-minute sessions only** (§6); short-preset support is deferred.
 
 **Scheduled resolution (compiler v2):** Server-owned segment skeleton — server computes all `target_duration_sec` values from the step-weight table; the model emits text per slot only. This also enables the D8 regen mode (copy-through unchanged steps verbatim).
+
+---
+
+## §2.3 — Trailing silence dropped when segments carry no raw pause (Phase 1.5)
+
+**Ambiguity:** Reconciliation (§2.3) distributes phase remainder across `pause_after_ms` slots. Phases whose segments all carry `pause_after_ms = 0` have no raw pause budget to stretch, so trailing silence is dropped entirely (observed on beta: ~79s voiced vs 120s budget, 0ms scheduled pause on the last segment).
+
+**Resolution (Phase 1.5):** Acceptable for v0 — post-synthesis reconciliation remains the duration authority and shortfall is absorbed as unvoiced gap. Scheduled fix in v0.5 server-owned segment skeleton: server pre-allocates `pause_after_ms` per slot from the step-weight table so every phase has distributable silence.

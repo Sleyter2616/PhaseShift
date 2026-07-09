@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { normalizeManifest } from "../compiler/normalize";
-import { COMPILER_PROMPT_V1_2, PROMPT_VERSION } from "../compiler/prompt.v1.2";
+import { COMPILER_PROMPT_V1_3, PROMPT_VERSION } from "../compiler/prompt.v1.3";
 import { stripCodeFences } from "../compiler/strip-fences";
 import { validateManifest, type Manifest } from "../contracts/manifest";
 import type { CompilerInput } from "../session/derive";
@@ -70,7 +70,7 @@ export async function compileManifest(
       model,
       max_tokens: 16_000,
       temperature: 0.2,
-      system: COMPILER_PROMPT_V1_2,
+      system: COMPILER_PROMPT_V1_3,
       messages: [{ role: "user", content: userMessage }],
     });
 

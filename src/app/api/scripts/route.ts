@@ -2,7 +2,7 @@ import { z } from "zod";
 import { NextResponse } from "next/server";
 import { assertDevAuth, DevAuthError, devAuthErrorResponse } from "@/lib/auth/dev-secret";
 import { intakeSchema } from "@/lib/contracts/intake";
-import { PROMPT_VERSION } from "@/lib/compiler/prompt.v1.2";
+import { PROMPT_VERSION } from "@/lib/compiler/prompt.v1.3";
 import { getServiceClient } from "@/lib/db/service-client";
 import { inngest } from "@/inngest/client";
 import { buildCompilerInput } from "@/lib/session/derive";

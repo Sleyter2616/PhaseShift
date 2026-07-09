@@ -2,6 +2,11 @@ import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { collectWordBudgetWarnings } from "../src/lib/contracts/manifest";
+import {
+  checkIntakeStringsVerbatim,
+  countBannedTokensInTheta,
+  formatBannedTokenWarning,
+} from "../src/lib/pipeline/phase1-verify";
 import { PHASES } from "../src/lib/schedule/reconcile";
 
 function loadEnvLocal(): void {
@@ -17,8 +22,6 @@ function loadEnvLocal(): void {
     if (!(key in process.env)) process.env[key] = value;
   }
 }
-
-const THETA_BANNED = /\b(will|would|could|might|hope|wish|try|want|someday)\b/gi;
 
 function pass(label: string, ok: boolean, detail = ""): boolean {
   console.log(`${ok ? "PASS" : "FAIL"} ${label}${detail ? `: ${detail}` : ""}`);
@@ -107,11 +110,14 @@ async function main() {
   }
   if (goal?.raw_statement) stringsToFind.push(goal.raw_statement);
 
-  const missing = stringsToFind.filter((s) => !concatText.includes(s));
+  const verbatim = checkIntakeStringsVerbatim(concatText, stringsToFind);
+  const verbatimLabel = verbatim.caseNormalized
+    ? "intake strings verbatim in segment text (case-normalized)"
+    : "intake strings verbatim in segment text";
   allPass &&= pass(
-    "intake strings verbatim in segment text",
-    missing.length === 0,
-    missing.length ? `missing: ${missing.slice(0, 3).join(" | ")}` : "",
+    verbatimLabel,
+    verbatim.ok,
+    verbatim.ok ? "" : `missing: ${verbatim.missing.slice(0, 3).join(" | ")}`,
   );
 
   const phaseBudget = (
@@ -149,10 +155,7 @@ async function main() {
   }
 
   const thetaText = thetaSegs.map((s) => s.text).join(" ");
-  const bannedMatches = thetaText.match(THETA_BANNED) ?? [];
-  console.log(
-    `WARN banned tokens in theta text: ${bannedMatches.length}${bannedMatches.length ? ` (${[...new Set(bannedMatches.map((m) => m.toLowerCase()))].join(", ")})` : ""}`,
-  );
+  console.log(formatBannedTokenWarning(countBannedTokensInTheta(thetaText)));
 
   const wordBudgetWarnings = collectWordBudgetWarnings(segs);
   console.log(`WARN word-budget: ${wordBudgetWarnings.length} segment(s) exceed advisory ceiling`);
