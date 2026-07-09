@@ -60,6 +60,9 @@ export class EntrainmentEngine {
     if (this.ctx.state === "suspended") {
       await this.ctx.resume();
     }
+    if (this.ctx.state === "suspended") {
+      throw new Error("AudioContext suspended — no user activation");
+    }
   }
 
   async suspend(): Promise<void> {

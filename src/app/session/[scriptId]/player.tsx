@@ -213,23 +213,32 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
 
   const startPlayback = useCallback(async () => {
     setError(null);
-    setStage("loading");
+
+    const engine = new EntrainmentEngine(undefined, { mode, toneGain, voiceGain });
+    engineRef.current = engine;
 
     try {
-      const { sessionId: createdSessionId } = await createSession(manifest.meta.script_id);
-      setSessionId(createdSessionId);
-
-      const engine = new EntrainmentEngine(undefined, { mode, toneGain, voiceGain });
-      engineRef.current = engine;
       await engine.resume();
-      await requestWakeLock();
+      if (engine.audioContext.state !== "running") {
+        setError("Audio was blocked by the browser — tap Begin again.");
+        setStage("prebegin");
+        disposeEngine();
+        return;
+      }
 
-      const compressed = await fetchCompressedBuffers(manifest, (loaded, total) => {
-        setFetchProgress({ loaded, total });
-      });
+      void requestWakeLock();
+      engine.startBed(initialBeatHz);
+      setStage("loading");
+
+      const [{ sessionId: createdSessionId }, compressed] = await Promise.all([
+        createSession(manifest.meta.script_id),
+        fetchCompressedBuffers(manifest, (loaded, total) => {
+          setFetchProgress({ loaded, total });
+        }),
+      ]);
+      setSessionId(createdSessionId);
       compressedRef.current = compressed;
 
-      engine.startBed(initialBeatHz);
       sessionStartCtxTimeRef.current = engine.audioContext.currentTime;
       setStage("playing");
 
