@@ -39,7 +39,7 @@ async function main() {
 
   const { data: script, error: scriptError } = await supabase
     .from("scripts")
-    .select("id, compiler_input, error_message")
+    .select("id, status, compiler_input, error_message")
     .eq("id", scriptId)
     .single();
 
@@ -84,7 +84,7 @@ async function main() {
 
   const { data: refreshed, error: refreshError } = await supabase
     .from("script_segments")
-    .select("actual_duration_sec, scheduled_pause_after_ms, phase")
+    .select("actual_duration_sec, scheduled_pause_after_ms, phase, synthesis_status")
     .eq("script_id", scriptId);
 
   if (refreshError) {
@@ -109,12 +109,26 @@ async function main() {
     overageWarning = null;
   }
 
+  const allSegmentsReady =
+    (refreshed ?? []).length > 0 &&
+    (refreshed ?? []).every((segment) => segment.synthesis_status === "ready");
+
+  const scriptUpdate: {
+    total_duration_sec: number;
+    error_message: string | null;
+    status?: "ready";
+  } = {
+    total_duration_sec: totalDurationSec,
+    error_message: overageWarning,
+  };
+
+  if (allSegmentsReady) {
+    scriptUpdate.status = "ready";
+  }
+
   const { error: scriptUpdateError } = await supabase
     .from("scripts")
-    .update({
-      total_duration_sec: totalDurationSec,
-      error_message: overageWarning,
-    })
+    .update(scriptUpdate)
     .eq("id", scriptId);
 
   if (scriptUpdateError) {
@@ -122,7 +136,10 @@ async function main() {
     process.exit(1);
   }
 
+  const finalStatus = allSegmentsReady ? "ready" : script.status;
+
   console.log(`re-reconciled script ${scriptId}`);
+  console.log(`status=${finalStatus}`);
   console.log(`total_duration_sec=${totalDurationSec}`);
   if (overBudgetPhases.length > 0) {
     console.log(`OVERAGE phases: ${overBudgetPhases.join(",")}`);
