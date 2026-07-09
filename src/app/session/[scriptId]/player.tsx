@@ -38,6 +38,7 @@ interface DebugSnapshot {
   scheduled: number;
   bedActive: boolean;
   mode: EntrainmentMode;
+  clock: "alive" | "dead" | "unknown";
 }
 
 const IS_DEV = process.env.NODE_ENV !== "production";
@@ -50,6 +51,7 @@ const EMPTY_DEBUG: DebugSnapshot = {
   scheduled: 0,
   bedActive: false,
   mode: "isochronic",
+  clock: "unknown",
 };
 
 function formatTime(sec: number): string {
@@ -106,6 +108,7 @@ function AudioDebugStrip({
         <span>scheduled:{debug.scheduled}</span>
         <span>bedActive:{String(debug.bedActive)}</span>
         <span>mode={debug.mode}</span>
+        <span>clock:{debug.clock}</span>
         <button
           type="button"
           disabled={!engineReady}
@@ -151,6 +154,7 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const debugTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const clockStatusRef = useRef<DebugSnapshot["clock"]>("unknown");
 
   const updateDebugSnapshot = useCallback(() => {
     const engine = engineRef.current;
@@ -167,6 +171,7 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
       scheduled: scheduledVoicesRef.current.size,
       bedActive: engine?.isBedActive() ?? false,
       mode: engine?.currentMode ?? mode,
+      clock: clockStatusRef.current,
     });
   }, [mode]);
 
@@ -196,6 +201,7 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
     }
     engineRef.current?.dispose();
     engineRef.current = null;
+    decodeWindowRef.current.dispose();
     decodeWindowRef.current = new JitDecodeWindow(3);
     if (!options?.keepBuffers) {
       compressedRef.current = new Map();
@@ -240,17 +246,15 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
   }, [stage, updateDebugSnapshot]);
 
   const ensureDecoded = useCallback(async (seq: number) => {
-    const engine = engineRef.current;
     const decodeWindow = decodeWindowRef.current;
-    if (!engine || decodeWindow.has(seq) || decodingRef.current.has(seq)) return;
+    if (decodeWindow.has(seq) || decodingRef.current.has(seq)) return;
 
     const compressed = compressedRef.current.get(seq);
     if (!compressed) return;
 
     decodingRef.current.add(seq);
     try {
-      const copy = compressed.slice(0);
-      const audioBuffer = await engine.audioContext.decodeAudioData(copy);
+      const audioBuffer = await decodeWindow.decode(compressed);
       decodeWindow.markDecoded(seq, audioBuffer);
     } catch (decodeError) {
       const message = decodeError instanceof Error ? decodeError.message : "decode failed";
@@ -341,31 +345,71 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
 
   const startAudio = useCallback(async () => {
     setError(null);
+    clockStatusRef.current = "unknown";
+    updateDebugSnapshot();
 
-    const engine = new EntrainmentEngine(undefined, { mode, toneGain, voiceGain });
-    engineRef.current = engine;
+    type TryFailureReason = "suspended" | "dead_clock" | "error";
 
-    try {
-      await engine.resume();
-      if (engine.audioContext.state !== "running") {
-        setError("Audio was blocked by the browser — tap Start audio again.");
-        disposeEngine({ keepBuffers: true });
-        return;
+    const tryStartEngine = async (
+      createCtx: () => AudioContext,
+    ): Promise<{ engine: EntrainmentEngine } | { reason: TryFailureReason }> => {
+      const engine = new EntrainmentEngine(createCtx(), { mode, toneGain, voiceGain });
+      try {
+        await engine.resume();
+        if (engine.audioContext.state !== "running") {
+          engine.dispose();
+          return { reason: "suspended" };
+        }
+        if (!(await engine.ensureClockAlive())) {
+          engine.dispose();
+          return { reason: "dead_clock" };
+        }
+        return { engine };
+      } catch {
+        engine.dispose();
+        return { reason: "error" };
       }
+    };
 
-      void requestWakeLock();
-      engine.startBed(initialBeatHz);
-      sessionStartCtxTimeRef.current = engine.audioContext.currentTime;
-      setStage("playing");
+    const attempt1 = await tryStartEngine(() => new AudioContext());
+    const attempt2 =
+      "engine" in attempt1
+        ? null
+        : await tryStartEngine(() => new AudioContext({ latencyHint: "playback" }));
+
+    const engine =
+      attempt1 && "engine" in attempt1
+        ? attempt1.engine
+        : attempt2 && "engine" in attempt2
+          ? attempt2.engine
+          : null;
+
+    if (!engine) {
+      const sawDeadClock =
+        ("reason" in attempt1 && attempt1.reason === "dead_clock") ||
+        (attempt2 != null && "reason" in attempt2 && attempt2.reason === "dead_clock");
+
+      clockStatusRef.current = sawDeadClock ? "dead" : "unknown";
+      setError(
+        sawDeadClock
+          ? "Audio engine could not start (output clock stalled). Fully quit and reopen your browser, or try another browser."
+          : "Audio was blocked by the browser — tap Start audio again.",
+      );
       updateDebugSnapshot();
-
-      tickRef.current = setInterval(runSchedulerTick, TICK_MS);
-      runSchedulerTick();
-    } catch (beginError) {
-      const message = beginError instanceof Error ? beginError.message : "failed to start audio";
-      setError(message);
       disposeEngine({ keepBuffers: true });
+      return;
     }
+
+    engineRef.current = engine;
+    clockStatusRef.current = "alive";
+    void requestWakeLock();
+    engine.startBed(initialBeatHz);
+    sessionStartCtxTimeRef.current = engine.audioContext.currentTime;
+    setStage("playing");
+    updateDebugSnapshot();
+
+    tickRef.current = setInterval(runSchedulerTick, TICK_MS);
+    runSchedulerTick();
   }, [
     disposeEngine,
     initialBeatHz,

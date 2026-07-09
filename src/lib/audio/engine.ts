@@ -1,3 +1,5 @@
+import { ensureClockAlive as checkClockAlive } from "./clock-watchdog";
+
 export type EntrainmentMode = "binaural" | "isochronic";
 
 export interface EntrainmentEngineOptions {
@@ -63,6 +65,11 @@ export class EntrainmentEngine {
     if (this.ctx.state === "suspended") {
       throw new Error("AudioContext suspended — no user activation");
     }
+  }
+
+  /** Sample currentTime before/after a short wait; false if the rendering clock never started. */
+  async ensureClockAlive(): Promise<boolean> {
+    return checkClockAlive(this.ctx);
   }
 
   async suspend(): Promise<void> {

@@ -1,5 +1,21 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { JitDecodeWindow } from "./decode-window";
+
+beforeAll(() => {
+  if (typeof globalThis.OfflineAudioContext === "undefined") {
+    class OfflineAudioContextShim {
+      decodeAudioData(): Promise<AudioBuffer> {
+        return Promise.resolve({} as AudioBuffer);
+      }
+
+      close(): Promise<void> {
+        return Promise.resolve();
+      }
+    }
+    globalThis.OfflineAudioContext =
+      OfflineAudioContextShim as unknown as typeof OfflineAudioContext;
+  }
+});
 
 describe("JitDecodeWindow", () => {
   it("keeps at most 3 decoded buffers and evicts oldest", () => {

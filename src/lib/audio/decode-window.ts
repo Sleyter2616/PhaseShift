@@ -2,8 +2,11 @@
 export class JitDecodeWindow {
   private readonly alive = new Map<number, unknown>();
   private readonly order: number[] = [];
+  private readonly offlineCtx: OfflineAudioContext;
 
-  constructor(private readonly maxAlive = 3) {}
+  constructor(private readonly maxAlive = 3) {
+    this.offlineCtx = new OfflineAudioContext(1, 1, 44_100);
+  }
 
   has(seq: number): boolean {
     return this.alive.has(seq);
@@ -11,6 +14,11 @@ export class JitDecodeWindow {
 
   get<T = unknown>(seq: number): T | undefined {
     return this.alive.get(seq) as T | undefined;
+  }
+
+  async decode(compressed: ArrayBuffer): Promise<AudioBuffer> {
+    const copy = compressed.slice(0);
+    return this.offlineCtx.decodeAudioData(copy);
   }
 
   markDecoded(seq: number, buffer: unknown): void {
@@ -45,6 +53,11 @@ export class JitDecodeWindow {
 
   aliveSeqs(): number[] {
     return [...this.order];
+  }
+
+  dispose(): void {
+    const close = (this.offlineCtx as unknown as { close?: () => Promise<void> }).close;
+    if (close) void close.call(this.offlineCtx);
   }
 
   private evictIfNeeded(): void {
