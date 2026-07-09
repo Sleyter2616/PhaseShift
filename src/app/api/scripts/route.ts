@@ -6,6 +6,10 @@ import { PROMPT_VERSION } from "@/lib/compiler/prompt.v1.3";
 import { getServiceClient } from "@/lib/db/service-client";
 import { inngest } from "@/inngest/client";
 import { buildCompilerInput } from "@/lib/session/derive";
+import {
+  defaultTtsModelId,
+  defaultTtsProvider,
+} from "@/lib/pipeline/synthesis-identity";
 
 export async function POST(request: Request) {
   try {
@@ -13,6 +17,20 @@ export async function POST(request: Request) {
     const body: unknown = await request.json();
     const intake = intakeSchema.parse(body);
     const supabase = getServiceClient();
+
+    const provider = defaultTtsProvider();
+    const ttsModelId = defaultTtsModelId();
+    const stockVoiceId =
+      provider === "selfhost"
+        ? (process.env.ELEVENLABS_STOCK_VOICE_ID ?? "mock-voice")
+        : process.env.ELEVENLABS_STOCK_VOICE_ID;
+
+    if (!stockVoiceId) {
+      return NextResponse.json(
+        { error: "ELEVENLABS_STOCK_VOICE_ID is required when TTS_PROVIDER=elevenlabs" },
+        { status: 500 },
+      );
+    }
 
     const title = intake.goal_statement.slice(0, 80);
     let goalId: string;
@@ -83,10 +101,12 @@ export async function POST(request: Request) {
         user_id: userId,
         goal_version_id: goalVersion.id,
         status: "generating",
+        provider,
+        stock_voice_id: stockVoiceId,
+        tts_model_id: ttsModelId,
         prompt_version: PROMPT_VERSION,
         llm_model: llmModel,
         entrainment_mode: intake.session.entrainment_mode,
-        stock_voice_id: "mock-voice",
         compiler_input: compilerInput,
       })
       .select("id")
@@ -96,10 +116,21 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: scriptError?.message ?? "script insert failed" }, { status: 500 });
     }
 
-    await inngest.send({
-      name: "script/generate.requested",
-      data: { script_id: script.id },
-    });
+    try {
+      await inngest.send({
+        name: "script/generate.requested",
+        data: { script_id: script.id },
+      });
+    } catch (enqueueError) {
+      const message =
+        enqueueError instanceof Error ? enqueueError.message : "unknown enqueue error";
+      await supabase
+        .from("scripts")
+        .update({ status: "failed", error_message: `enqueue_failed: ${message}`.slice(0, 4000) })
+        .eq("id", script.id);
+
+      return NextResponse.json({ error: `enqueue_failed: ${message}` }, { status: 502 });
+    }
 
     return NextResponse.json({ script_id: script.id }, { status: 202 });
   } catch (error) {

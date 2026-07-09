@@ -1,14 +1,18 @@
 import { NonRetriableError } from "inngest";
 import { inngest } from "../client";
+import { getServiceClient } from "@/lib/db/service-client";
 import {
   CompilerError,
   compileManifest,
   formatCompilerFailureMessage,
 } from "@/lib/compiler/compile";
-import { getServiceClient } from "@/lib/db/service-client";
 import { applyDedupeHits, planSegmentDedupe } from "@/lib/pipeline/dedupe-plan";
 import { deriveSegmentRows } from "@/lib/pipeline/segment-rows";
 import { reconcileSegments } from "@/lib/pipeline/reconcile-persist";
+import {
+  resolveSynthesisIdentity,
+  type ScriptVoiceSource,
+} from "@/lib/pipeline/synthesis-identity";
 import type { CompilerInput } from "@/lib/session/derive";
 import { synthesizeSegment } from "./synthesize-segment";
 
@@ -34,7 +38,9 @@ export const generateScript = inngest.createFunction(
         const supabase = getServiceClient();
         const { data, error } = await supabase
           .from("scripts")
-          .select("id, user_id, goal_version_id, compiler_input, status")
+          .select(
+            "id, user_id, goal_version_id, compiler_input, status, provider, stock_voice_id, voice_profile_id, tts_model_id",
+          )
           .eq("id", scriptId)
           .single();
 
@@ -42,14 +48,15 @@ export const generateScript = inngest.createFunction(
           throw new Error(`script not found: ${error?.message ?? scriptId}`);
         }
 
-        return data as {
+        return data as ScriptVoiceSource & {
           id: string;
-          user_id: string;
           goal_version_id: string;
           compiler_input: CompilerInput;
           status: string;
         };
       });
+
+      const synthesisIdentity = resolveSynthesisIdentity(scriptCtx);
 
       const manifest = await step.run("compile", async () => {
         try {
@@ -68,6 +75,7 @@ export const generateScript = inngest.createFunction(
         const rows = deriveSegmentRows(manifest, {
           scriptId: scriptCtx.id,
           userId: scriptCtx.user_id,
+          synthesisIdentity,
         });
 
         const { error: deleteError } = await supabase
@@ -94,7 +102,11 @@ export const generateScript = inngest.createFunction(
 
       const dedupe = await step.run("dedupe-plan", async () => {
         const supabase = getServiceClient();
-        const plan = await planSegmentDedupe(supabase, scriptCtx.user_id, segments);
+        const plan = await planSegmentDedupe(
+          supabase,
+          { userId: scriptCtx.user_id, assetScope: synthesisIdentity.assetScope },
+          segments,
+        );
         await applyDedupeHits(supabase, plan.hits);
 
         await supabase.from("scripts").update({ status: "synthesizing" }).eq("id", scriptId);
@@ -103,20 +115,33 @@ export const generateScript = inngest.createFunction(
       });
 
       if (dedupe.misses.length > 0) {
+        const textBySegmentId = new Map(segments.map((segment) => [segment.id, segment.text]));
+        const ordered = [...segments].sort((a, b) => a.seq - b.seq);
+
         await Promise.all(
-          dedupe.misses.map((miss, index) =>
-            step.invoke(`synthesize-${index}`, {
+          dedupe.misses.map((miss, index) => {
+            const orderedIndex = ordered.findIndex((segment) => segment.id === miss.segmentId);
+            const previousText =
+              orderedIndex > 0 ? ordered[orderedIndex - 1]?.text : undefined;
+            const nextText =
+              orderedIndex >= 0 && orderedIndex < ordered.length - 1
+                ? ordered[orderedIndex + 1]?.text
+                : undefined;
+
+            return step.invoke(`synthesize-${index}`, {
               function: synthesizeSegment,
               data: {
                 script_id: scriptId,
                 segment_id: miss.segmentId,
                 user_id: scriptCtx.user_id,
                 dedupe_key: miss.contentHash,
-                text: miss.text,
+                text: textBySegmentId.get(miss.segmentId) ?? miss.text,
                 pacing_wpm: miss.pacingWpm,
+                previous_text: previousText,
+                next_text: nextText,
               },
-            }),
-          ),
+            });
+          }),
         );
       }
 

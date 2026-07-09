@@ -16,6 +16,8 @@ export type ScriptSynthesizeSegment = {
     dedupe_key: string;
     text: string;
     pacing_wpm: number;
+    previous_text?: string;
+    next_text?: string;
   };
 };
 

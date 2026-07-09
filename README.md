@@ -9,15 +9,16 @@ See the full execution plan in [`docs/blueprint.md`](docs/blueprint.md).
 - **Runtime:** Next.js 15 (App Router), React 19, TypeScript (strict), Zod
 - **Jobs:** Inngest (generation pipeline)
 - **Database:** Supabase (Postgres + Storage)
-- **LLM:** Anthropic Claude (compiler); **TTS:** MockTTSProvider in Phase 1 (zero spend)
+- **LLM:** Anthropic Claude (compiler); **TTS:** ElevenLabs via raw `fetch` (Phase 2; `selfhost` mock for offline CI)
 - **Package manager:** pnpm (Node 22 LTS via `.nvmrc`)
 
 ## Prerequisites
 
 - Node.js ≥ 22 (`nvm use`)
 - pnpm 9+
-- Hosted Supabase dev project with migrations `0001`–`0004` applied
+- Hosted Supabase dev project with migrations `0001`–`0006` applied
 - [Anthropic API key](https://console.anthropic.com/)
+- [ElevenLabs API key](https://elevenlabs.io/) (Phase 2 live synthesis)
 - [Inngest dev server](https://www.inngest.com/docs/local-development)
 
 ## Environment
@@ -29,14 +30,29 @@ Copy `.env.example` to `.env.local` and fill in:
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | Server-only DB + storage writes |
 | `ANTHROPIC_API_KEY` | Claude compiler |
+| `ELEVENLABS_API_KEY` | ElevenLabs TTS (live synthesis) |
+| `ELEVENLABS_STOCK_VOICE_ID` | Default stock voice for `POST /api/scripts` |
+| `ELEVENLABS_MODEL_ID` | Default `eleven_flash_v2_5` |
+| `TTS_PROVIDER` | `elevenlabs` (default) or `selfhost` for offline mock |
 | `LLM_MODEL` | Default `claude-sonnet-4-6` |
 | `DEV_USER_ID` | From seed script (Phase 1 dev auth) |
 | `DEV_API_SECRET` | Shared secret for `x-dev-secret` header |
 | `INNGEST_EVENT_KEY` / `INNGEST_SIGNING_KEY` | Inngest Cloud (optional for local dev) |
 
-## Local development (Phase 1)
+## Local development (Phase 2)
 
-### 1. Install and test
+> **Cost warning:** A full 40-minute generation synthesizes every segment via ElevenLabs and can consume substantial API credits. Use `TTS_PROVIDER=selfhost` for zero-cost offline pipeline tests, and run `pnpm tts:sample` first to validate voice/model choice before a full compile.
+
+### 0. S1 voice bake-off (optional, recommended)
+
+```bash
+pnpm tts:sample <elevenlabs_voice_id> [model_id]
+# writes ./samples/<voiceId>-<modelId>.mp3 — play locally before full generation
+```
+
+Set `ELEVENLABS_STOCK_VOICE_ID` in `.env.local` to the winning voice.
+
+### 1. Install and test (offline)
 
 ```bash
 pnpm install
@@ -85,6 +101,15 @@ pnpm tsx scripts/verify-phase1.ts <script_id>
 pnpm tsx scripts/resynth-check.ts <script_id>
 ```
 
+### 7. Playback manifest (Phase 3 contract)
+
+```bash
+curl -s http://localhost:3000/api/scripts/<script_id>/manifest \
+  -H "x-dev-secret: $DEV_API_SECRET" | jq .
+```
+
+Returns ordered segments with `signedUrl` (24h TTL) plus script meta.
+
 ## Commands
 
 | Command | Description |
@@ -96,21 +121,23 @@ pnpm tsx scripts/resynth-check.ts <script_id>
 | `pnpm tsx scripts/seed-dev-user.ts` | Create dev auth user + profile |
 | `pnpm tsx scripts/verify-phase1.ts <id>` | Phase 1 acceptance checks |
 | `pnpm tsx scripts/resynth-check.ts <id>` | Dedupe idempotency check |
+| `pnpm tts:sample <voiceId> [modelId]` | S1 bake-off: ~75s excerpt MP3 |
 
 ## Repo map
 
 ```
 src/
-  app/api/scripts/        POST intake → enqueue generation
+  app/api/scripts/        POST intake, GET manifest
   app/api/inngest/        Inngest serve endpoint
   app/dev/scripts/[id]/   Dev status page (poll)
   inngest/functions/      generate-script, synthesize-segment
   lib/compiler/           Claude compile + retry
   lib/contracts/          intake + manifest Zod
   lib/pipeline/           segment derivation, dedupe, reconcile
+  lib/tts/                ElevenLabs + selfhost providers
   lib/session/derive.ts   intake → compiler INPUT session block
-scripts/                  seed, verify, resynth-check
-supabase/migrations/      0001–0004 (0004 via connector for Phase 1)
+scripts/                  seed, verify, resynth-check, tts-sample
+supabase/migrations/      0001–0006
 ```
 
 ## Roadmap
