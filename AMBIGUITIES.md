@@ -83,3 +83,37 @@ Recorded ambiguities from `docs/blueprint.md` where the Phase 0 prompt or bluepr
 **Ambiguity:** §5 cost tables and the Flash-vs-Multilingual v2 fidelity gate assume a single vendor (ElevenLabs). Phase 0.1 introduces `tts_provider` enum and `PROVIDER_PRICING_USD_PER_1M_CHARS` with indicative per-provider ranges.
 
 **Proposed resolution:** §5 pricing tables become provider-conditional at Phase 2 implementation time. The fidelity gate expands to a multi-provider bake-off: same 90s voice sample, blind A/B across shortlisted providers (at minimum ElevenLabs Flash, ElevenLabs v2, and one cost leader), rating voice similarity, naturalness, and daily-usability before locking default `provider` on `scripts` and credit burn rates.
+
+---
+
+## §1.2B — Regen economics and byte-identical segment assumption (D8, Phase 1)
+
+**Ambiguity:** §1.2B assumes re-triangulation regen costs ~40% because unchanged segments hash-match and reuse `audio_files`. LLM recompilation does not guarantee byte-identical text for unchanged theta steps — wording drift breaks dedupe even when semantics are preserved.
+
+**Proposed resolution:** Introduce a compiler **regen mode** in v0.5 that accepts the prior manifest and emits unchanged steps verbatim (copy-through), with only edited steps recompiled. Phase 1 validates dedupe via idempotent re-synthesis (`resynth-check.ts`: 0 new `audio_files` rows on cache replay), not cross-compile stability.
+
+---
+
+## §2.2 — System prompt references schema never provided (erratum, Phase 1.2)
+
+**Ambiguity:** Blueprint §2.2 tells the model to emit JSON "matching the provided schema" but the v1 system prompt never embeds the §2.1 manifest contract. Models invent non-conforming shapes (`segment_id`, nested `meta.session`, etc.).
+
+**Resolution (applied in `prompt.v1.1`):** `COMPILER_PROMPT_V1_1` appends an explicit `## OUTPUT SCHEMA (exact, mandatory)` section before SELF-CHECK, mirroring the §2.1 Zod contract field names. `prompt.v1.ts` remains immutable; active `PROMPT_VERSION` is `v1.1`.
+
+---
+
+## §2.2 / §2.3 / §6 — Short-preset word budgets vs. verbatim content (D9, Phase 1.4)
+
+**Ambiguity:** §2.2 step weights × per-segment word budgets under-provision theta steps on short presets (20 min): mandated verbatim intake strings (goal, localization, triangulation, features, sync_actions, not_list) do not scale down with duration, yet step weights still require all twelve theta steps. Hard word ceilings and exact `target_duration_sec` sums are jointly unsatisfiable on short presets.
+
+**Resolution (applied in Phase 1.4):** Word-budget checks move from hard validation to advisory `warnings` on `validateManifest`; post-synthesis reconciliation (§2.3, D9) is the duration authority. **v0 ships 40-minute sessions only** (§6); short-preset support is deferred.
+
+**Scheduled resolution (compiler v2):** Server-owned segment skeleton — server computes all `target_duration_sec` values from the step-weight table; the model emits text per slot only. This also enables the D8 regen mode (copy-through unchanged steps verbatim).
+
+---
+
+## §2.3 — Trailing silence dropped when segments carry no raw pause (Phase 1.5)
+
+**Ambiguity:** Reconciliation (§2.3) distributes phase remainder across `pause_after_ms` slots. Phases whose segments all carry `pause_after_ms = 0` have no raw pause budget to stretch, so trailing silence is dropped entirely (observed on beta: ~79s voiced vs 120s budget, 0ms scheduled pause on the last segment).
+
+**Resolution (Phase 1.5):** Acceptable for v0 — post-synthesis reconciliation remains the duration authority and shortfall is absorbed as unvoiced gap. Scheduled fix in v0.5 server-owned segment skeleton: server pre-allocates `pause_after_ms` per slot from the step-weight table so every phase has distributable silence.

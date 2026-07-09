@@ -82,6 +82,30 @@ function collectBreakErrors(segment: ManifestSegment): string[] {
   return errors;
 }
 
+type WordBudgetSegment = Pick<
+  ManifestSegment,
+  "seq" | "pacing_wpm" | "target_duration_sec" | "text"
+>;
+
+export function collectWordBudgetWarnings(
+  segments: ReadonlyArray<WordBudgetSegment>,
+): string[] {
+  const warnings: string[] = [];
+
+  for (const segment of segments) {
+    const wordBudget = (segment.pacing_wpm * segment.target_duration_sec) / 60;
+    const maxWords = Math.ceil(1.15 * wordBudget);
+    const words = countWords(segment.text);
+    if (words > maxWords) {
+      warnings.push(
+        `word-budget: segment seq ${segment.seq}: word count ${words} exceeds budget ${maxWords} (115% of ${wordBudget.toFixed(1)}; pacing_wpm ${segment.pacing_wpm} × ${segment.target_duration_sec}s / 60)`,
+      );
+    }
+  }
+
+  return warnings;
+}
+
 function collectRefinementErrors(manifest: Manifest): string[] {
   const errors: string[] = [];
 
@@ -98,14 +122,6 @@ function collectRefinementErrors(manifest: Manifest): string[] {
 
   for (const segment of manifest.segments) {
     errors.push(...collectBreakErrors(segment));
-
-    const wordBudget = (segment.pacing_wpm * segment.target_duration_sec) / 60;
-    const words = countWords(segment.text);
-    if (words > wordBudget) {
-      errors.push(
-        `segment seq ${segment.seq}: word count ${words} exceeds budget ${wordBudget.toFixed(1)} (pacing_wpm ${segment.pacing_wpm} × ${segment.target_duration_sec}s / 60)`,
-      );
-    }
 
     if (segment.phase !== "theta" && segment.step !== null && segment.step !== undefined) {
       errors.push(`segment seq ${segment.seq}: step must be null outside theta phase`);
@@ -149,7 +165,7 @@ function collectRefinementErrors(manifest: Manifest): string[] {
 }
 
 export type ManifestValidationResult =
-  | { ok: true; data: Manifest }
+  | { ok: true; data: Manifest; warnings: string[] }
   | { ok: false; errors: string[] };
 
 export function validateManifest(json: unknown): ManifestValidationResult {
@@ -167,7 +183,11 @@ export function validateManifest(json: unknown): ManifestValidationResult {
     return { ok: false, errors: refinementErrors };
   }
 
-  return { ok: true, data: parsed.data };
+  return {
+    ok: true,
+    data: parsed.data,
+    warnings: collectWordBudgetWarnings(parsed.data.segments),
+  };
 }
 
 export { manifestSchema, phaseEnum, perspectiveEnum, horizonEnum, archetypeEnum };

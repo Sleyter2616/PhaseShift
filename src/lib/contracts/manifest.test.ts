@@ -66,6 +66,9 @@ describe("validateManifest", () => {
 
     const result = validateManifest({ ...baseManifest, segments });
     expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.warnings).toEqual([]);
+    }
   });
 
   it("returns formatted errors when phase budgets do not sum", () => {
@@ -89,7 +92,7 @@ describe("validateManifest", () => {
     }
   });
 
-  it("rejects break tags over 3.0 seconds", () => {
+  it("rejects break tags over 3.0 seconds before normalization", () => {
     const result = validateManifest({
       ...baseManifest,
       segments: [
@@ -107,6 +110,68 @@ describe("validateManifest", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.errors.some((e) => e.includes("3.0s"))).toBe(true);
+    }
+  });
+
+  it("emits word-budget warnings above 115% but does not hard-fail", () => {
+    const segments = [
+      {
+        seq: 1,
+        phase: "beta",
+        step: null,
+        pacing_wpm: 130,
+        target_duration_sec: 60,
+        pause_after_ms: 1000,
+        text: "You are seated now.",
+      },
+      {
+        seq: 2,
+        phase: "alpha",
+        step: null,
+        pacing_wpm: 90,
+        target_duration_sec: 240,
+        pause_after_ms: 1000,
+        text: "You breathe slowly.",
+      },
+      ...Array.from({ length: 12 }, (_, i) => thetaSegment(3 + i, i + 1, 65)),
+      {
+        seq: 15,
+        phase: "gamma",
+        step: null,
+        pacing_wpm: 150,
+        target_duration_sec: 120,
+        pause_after_ms: 500,
+        text: "You rise with energy.",
+      },
+    ];
+
+    const wordBudget = (130 * 60) / 60;
+    const maxWords = Math.ceil(1.15 * wordBudget);
+    const withinText = Array.from({ length: maxWords }, (_, i) => `word${i}`).join(" ");
+    const overText = Array.from({ length: maxWords + 1 }, (_, i) => `word${i}`).join(" ");
+
+    const within = validateManifest({
+      ...baseManifest,
+      segments: segments.map((segment) =>
+        segment.seq === 1 ? { ...segment, text: withinText } : segment,
+      ),
+    });
+    expect(within.ok).toBe(true);
+    if (within.ok) {
+      expect(within.warnings).toEqual([]);
+    }
+
+    const over = validateManifest({
+      ...baseManifest,
+      segments: segments.map((segment) =>
+        segment.seq === 1 ? { ...segment, text: overText } : segment,
+      ),
+    });
+    expect(over.ok).toBe(true);
+    if (over.ok) {
+      expect(over.warnings).toHaveLength(1);
+      expect(over.warnings[0]).toMatch(/^word-budget:/);
+      expect(over.warnings[0]).toContain("115%");
     }
   });
 });
