@@ -17,11 +17,40 @@ import {
 } from "@/lib/audio/scheduler";
 import { completeSession, createSession } from "./actions";
 
-type PlayerStage = "prebegin" | "loading" | "playing" | "paused" | "rating" | "done";
+type PlayerStage =
+  | "prebegin"
+  | "loading"
+  | "readyToPlay"
+  | "playing"
+  | "paused"
+  | "rating"
+  | "done";
 
 interface SessionPlayerProps {
   manifest: PlaybackManifest;
 }
+
+interface DebugSnapshot {
+  ctxState: string;
+  ctxTime: number | null;
+  elapsed: number;
+  decoded: number;
+  scheduled: number;
+  bedActive: boolean;
+  mode: EntrainmentMode;
+}
+
+const IS_DEV = process.env.NODE_ENV !== "production";
+
+const EMPTY_DEBUG: DebugSnapshot = {
+  ctxState: "none",
+  ctxTime: null,
+  elapsed: 0,
+  decoded: 0,
+  scheduled: 0,
+  bedActive: false,
+  mode: "isochronic",
+};
 
 function formatTime(sec: number): string {
   const clamped = Math.max(0, Math.floor(sec));
@@ -54,6 +83,42 @@ async function fetchCompressedBuffers(
   return buffers;
 }
 
+function AudioDebugStrip({
+  debug,
+  engineReady,
+  onTestTone,
+}: {
+  debug: DebugSnapshot;
+  engineReady: boolean;
+  onTestTone: () => void;
+}) {
+  if (!IS_DEV) return null;
+
+  const ctxTimeLabel = debug.ctxTime != null ? debug.ctxTime.toFixed(1) : "—";
+
+  return (
+    <div className="fixed inset-x-0 bottom-0 z-50 border-t border-amber-300 bg-amber-50 px-3 py-2 font-mono text-[11px] leading-relaxed text-neutral-800">
+      <div className="mx-auto flex max-w-xl flex-wrap items-center gap-x-3 gap-y-1">
+        <span>ctx.state={debug.ctxState}</span>
+        <span>ctx.t={ctxTimeLabel}</span>
+        <span>elapsed={debug.elapsed.toFixed(1)}</span>
+        <span>decoded:{debug.decoded}</span>
+        <span>scheduled:{debug.scheduled}</span>
+        <span>bedActive:{String(debug.bedActive)}</span>
+        <span>mode={debug.mode}</span>
+        <button
+          type="button"
+          disabled={!engineReady}
+          onClick={onTestTone}
+          className="rounded border border-neutral-400 px-2 py-0.5 disabled:opacity-40"
+        >
+          Test tone
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function SessionPlayer({ manifest }: SessionPlayerProps) {
   const schedule = useMemo(() => computeSegmentSchedule(manifest.segments), [manifest.segments]);
   const glideBoundaries = useMemo(
@@ -74,6 +139,7 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [exitAlertness, setExitAlertness] = useState(3);
   const [error, setError] = useState<string | null>(null);
+  const [debug, setDebug] = useState<DebugSnapshot>(EMPTY_DEBUG);
 
   const engineRef = useRef<EntrainmentEngine | null>(null);
   const decodeWindowRef = useRef(new JitDecodeWindow(3));
@@ -84,6 +150,25 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
   const decodingRef = useRef(new Set<number>());
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const debugTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const updateDebugSnapshot = useCallback(() => {
+    const engine = engineRef.current;
+    const sessionStart = sessionStartCtxTimeRef.current;
+    const ctxTime = engine?.audioContext.currentTime ?? null;
+    const elapsed =
+      sessionStart != null && ctxTime != null ? Math.max(0, ctxTime - sessionStart) : 0;
+
+    setDebug({
+      ctxState: engine?.audioContext.state ?? "none",
+      ctxTime,
+      elapsed,
+      decoded: decodeWindowRef.current.aliveCount(),
+      scheduled: scheduledVoicesRef.current.size,
+      bedActive: engine?.isBedActive() ?? false,
+      mode: engine?.currentMode ?? mode,
+    });
+  }, [mode]);
 
   const requestWakeLock = useCallback(async () => {
     if (!("wakeLock" in navigator)) return;
@@ -104,7 +189,7 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
     wakeLockRef.current = null;
   }, []);
 
-  const disposeEngine = useCallback(() => {
+  const disposeEngine = useCallback((options?: { keepBuffers?: boolean }) => {
     if (tickRef.current) {
       clearInterval(tickRef.current);
       tickRef.current = null;
@@ -112,7 +197,9 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
     engineRef.current?.dispose();
     engineRef.current = null;
     decodeWindowRef.current = new JitDecodeWindow(3);
-    compressedRef.current = new Map();
+    if (!options?.keepBuffers) {
+      compressedRef.current = new Map();
+    }
     sessionStartCtxTimeRef.current = null;
     scheduledVoicesRef.current = new Set();
     triggeredGlidesRef.current = new Set();
@@ -132,6 +219,25 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
       disposeEngine();
     };
   }, [disposeEngine, releaseWakeLock, requestWakeLock, stage]);
+
+  useEffect(() => {
+    if (!IS_DEV || stage !== "readyToPlay") {
+      if (debugTickRef.current) {
+        clearInterval(debugTickRef.current);
+        debugTickRef.current = null;
+      }
+      return;
+    }
+
+    updateDebugSnapshot();
+    debugTickRef.current = setInterval(updateDebugSnapshot, TICK_MS);
+    return () => {
+      if (debugTickRef.current) {
+        clearInterval(debugTickRef.current);
+        debugTickRef.current = null;
+      }
+    };
+  }, [stage, updateDebugSnapshot]);
 
   const ensureDecoded = useCallback(async (seq: number) => {
     const engine = engineRef.current;
@@ -164,6 +270,7 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
     const elapsed = Math.max(0, ctxNow - sessionStart);
     setElapsedSec(elapsed);
     setCurrentPhase(phaseAtElapsed(schedule, elapsed));
+    updateDebugSnapshot();
 
     if (elapsed >= totalSec) {
       setStage("rating");
@@ -209,27 +316,13 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
       const atCtxTime = sessionStart + glide.atSec;
       engine.glideBeat(glide.toHz, glide.durationSec, atCtxTime);
     }
-  }, [ensureDecoded, glideBoundaries, releaseWakeLock, schedule, totalSec]);
+  }, [ensureDecoded, glideBoundaries, releaseWakeLock, schedule, totalSec, updateDebugSnapshot]);
 
   const startPlayback = useCallback(async () => {
     setError(null);
-
-    const engine = new EntrainmentEngine(undefined, { mode, toneGain, voiceGain });
-    engineRef.current = engine;
+    setStage("loading");
 
     try {
-      await engine.resume();
-      if (engine.audioContext.state !== "running") {
-        setError("Audio was blocked by the browser — tap Begin again.");
-        setStage("prebegin");
-        disposeEngine();
-        return;
-      }
-
-      void requestWakeLock();
-      engine.startBed(initialBeatHz);
-      setStage("loading");
-
       const [{ sessionId: createdSessionId }, compressed] = await Promise.all([
         createSession(manifest.meta.script_id),
         fetchCompressedBuffers(manifest, (loaded, total) => {
@@ -238,28 +331,55 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
       ]);
       setSessionId(createdSessionId);
       compressedRef.current = compressed;
-
-      sessionStartCtxTimeRef.current = engine.audioContext.currentTime;
-      setStage("playing");
-
-      tickRef.current = setInterval(runSchedulerTick, TICK_MS);
-      runSchedulerTick();
+      setStage("readyToPlay");
     } catch (beginError) {
       const message = beginError instanceof Error ? beginError.message : "failed to begin session";
       setError(message);
       setStage("prebegin");
-      disposeEngine();
+    }
+  }, [manifest]);
+
+  const startAudio = useCallback(async () => {
+    setError(null);
+
+    const engine = new EntrainmentEngine(undefined, { mode, toneGain, voiceGain });
+    engineRef.current = engine;
+
+    try {
+      await engine.resume();
+      if (engine.audioContext.state !== "running") {
+        setError("Audio was blocked by the browser — tap Start audio again.");
+        disposeEngine({ keepBuffers: true });
+        return;
+      }
+
+      void requestWakeLock();
+      engine.startBed(initialBeatHz);
+      sessionStartCtxTimeRef.current = engine.audioContext.currentTime;
+      setStage("playing");
+      updateDebugSnapshot();
+
+      tickRef.current = setInterval(runSchedulerTick, TICK_MS);
+      runSchedulerTick();
+    } catch (beginError) {
+      const message = beginError instanceof Error ? beginError.message : "failed to start audio";
+      setError(message);
+      disposeEngine({ keepBuffers: true });
     }
   }, [
     disposeEngine,
     initialBeatHz,
-    manifest,
     mode,
     requestWakeLock,
     runSchedulerTick,
     toneGain,
+    updateDebugSnapshot,
     voiceGain,
   ]);
+
+  const handleTestTone = useCallback(() => {
+    engineRef.current?.playTestTone();
+  }, []);
 
   const togglePause = useCallback(async () => {
     const engine = engineRef.current;
@@ -268,6 +388,7 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
     if (stage === "playing") {
       await engine.suspend();
       setStage("paused");
+      updateDebugSnapshot();
       return;
     }
 
@@ -275,8 +396,9 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
       await engine.resume();
       setStage("playing");
       void requestWakeLock();
+      updateDebugSnapshot();
     }
-  }, [requestWakeLock, stage]);
+  }, [requestWakeLock, stage, updateDebugSnapshot]);
 
   const handleEnd = useCallback(async () => {
     if (tickRef.current) {
@@ -291,7 +413,8 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
   const handleModeChange = useCallback((nextMode: EntrainmentMode) => {
     setMode(nextMode);
     engineRef.current?.setMode(nextMode);
-  }, []);
+    updateDebugSnapshot();
+  }, [updateDebugSnapshot]);
 
   const handleVoiceGain = useCallback((value: number) => {
     setVoiceGain(value);
@@ -318,6 +441,18 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
       setError(message);
     }
   }, [disposeEngine, elapsedSec, exitAlertness, sessionId]);
+
+  const engineReady = stage === "playing" || stage === "paused";
+
+  const debugStrip = (
+    <AudioDebugStrip
+      debug={debug}
+      engineReady={engineReady}
+      onTestTone={handleTestTone}
+    />
+  );
+
+  const debugPad = IS_DEV && (stage === "readyToPlay" || stage === "playing" || stage === "paused");
 
   if (stage === "prebegin") {
     return (
@@ -368,6 +503,29 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
     );
   }
 
+  if (stage === "readyToPlay") {
+    return (
+      <>
+        <main className={`mx-auto max-w-xl space-y-6 p-6 ${debugPad ? "pb-20" : ""}`}>
+          <h1 className="text-xl font-semibold">Ready to play</h1>
+          <p className="text-sm text-neutral-600">
+            Segments downloaded. Tap below to start audio — your browser requires a direct tap to
+            unlock sound.
+          </p>
+          {error ? <p className="text-sm text-red-700">{error}</p> : null}
+          <button
+            type="button"
+            onClick={() => void startAudio()}
+            className="w-full rounded bg-neutral-900 px-6 py-4 text-lg font-medium text-white"
+          >
+            Start audio
+          </button>
+        </main>
+        {debugStrip}
+      </>
+    );
+  }
+
   if (stage === "rating") {
     return (
       <main className="mx-auto max-w-xl space-y-6 p-6">
@@ -411,84 +569,87 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
   }
 
   return (
-    <main className="mx-auto max-w-xl space-y-6 p-6">
-      <header className="space-y-1">
-        <p className="text-xs uppercase tracking-wide text-neutral-500">Current phase</p>
-        <p className="text-2xl font-semibold capitalize">{currentPhase ?? "—"}</p>
-        <p className="text-sm text-neutral-600">
-          {formatTime(elapsedSec)} / {formatTime(totalSec)}
-        </p>
-      </header>
+    <>
+      <main className={`mx-auto max-w-xl space-y-6 p-6 ${debugPad ? "pb-20" : ""}`}>
+        <header className="space-y-1">
+          <p className="text-xs uppercase tracking-wide text-neutral-500">Current phase</p>
+          <p className="text-2xl font-semibold capitalize">{currentPhase ?? "—"}</p>
+          <p className="text-sm text-neutral-600">
+            {formatTime(elapsedSec)} / {formatTime(totalSec)}
+          </p>
+        </header>
 
-      <div className="space-y-4 rounded border border-neutral-200 p-4">
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => void togglePause()}
-            className="rounded border border-neutral-300 px-3 py-1.5 text-sm"
-          >
-            {stage === "paused" ? "Resume" : "Pause"}
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleEnd()}
-            className="rounded border border-neutral-300 px-3 py-1.5 text-sm"
-          >
-            End session
-          </button>
+        <div className="space-y-4 rounded border border-neutral-200 p-4">
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => void togglePause()}
+              className="rounded border border-neutral-300 px-3 py-1.5 text-sm"
+            >
+              {stage === "paused" ? "Resume" : "Pause"}
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleEnd()}
+              className="rounded border border-neutral-300 px-3 py-1.5 text-sm"
+            >
+              End session
+            </button>
+          </div>
+
+          <label className="block text-sm">
+            Voice volume
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.01}
+              value={voiceGain}
+              onChange={(event) => handleVoiceGain(Number(event.target.value))}
+              className="mt-1 w-full"
+            />
+          </label>
+
+          <label className="block text-sm">
+            Tone volume
+            <input
+              type="range"
+              min={0}
+              max={0.5}
+              step={0.01}
+              value={toneGain}
+              onChange={(event) => handleToneGain(Number(event.target.value))}
+              className="mt-1 w-full"
+            />
+          </label>
+
+          <fieldset className="space-y-2 text-sm">
+            <legend className="font-medium">Entrainment mode</legend>
+            <label className="flex items-center gap-2">
+              <input
+                type="radio"
+                name="mode"
+                checked={mode === "isochronic"}
+                onChange={() => handleModeChange("isochronic")}
+              />
+              Isochronic (speakers OK)
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="radio"
+                name="mode"
+                checked={mode === "binaural"}
+                onChange={() => handleModeChange("binaural")}
+              />
+              Binaural (requires headphones)
+            </label>
+          </fieldset>
         </div>
 
-        <label className="block text-sm">
-          Voice volume
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.01}
-            value={voiceGain}
-            onChange={(event) => handleVoiceGain(Number(event.target.value))}
-            className="mt-1 w-full"
-          />
-        </label>
-
-        <label className="block text-sm">
-          Tone volume
-          <input
-            type="range"
-            min={0}
-            max={0.5}
-            step={0.01}
-            value={toneGain}
-            onChange={(event) => handleToneGain(Number(event.target.value))}
-            className="mt-1 w-full"
-          />
-        </label>
-
-        <fieldset className="space-y-2 text-sm">
-          <legend className="font-medium">Entrainment mode</legend>
-          <label className="flex items-center gap-2">
-            <input
-              type="radio"
-              name="mode"
-              checked={mode === "isochronic"}
-              onChange={() => handleModeChange("isochronic")}
-            />
-            Isochronic (speakers OK)
-          </label>
-          <label className="flex items-center gap-2">
-            <input
-              type="radio"
-              name="mode"
-              checked={mode === "binaural"}
-              onChange={() => handleModeChange("binaural")}
-            />
-            Binaural (requires headphones)
-          </label>
-        </fieldset>
-      </div>
-
-      {error ? <p className="text-sm text-red-700">{error}</p> : null}
-      <p className="text-xs text-neutral-500">Keep this screen visible for uninterrupted playback.</p>
-    </main>
+        {error ? <p className="text-sm text-red-700">{error}</p> : null}
+        <p className="text-xs text-neutral-500">Keep this screen visible for uninterrupted playback.</p>
+      </main>
+      {debugStrip}
+    </>
   );
 }

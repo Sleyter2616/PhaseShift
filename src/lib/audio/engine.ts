@@ -151,6 +151,22 @@ export class EntrainmentEngine {
     return src;
   }
 
+  isBedActive(): boolean {
+    return this.bedNodes.length > 0;
+  }
+
+  /** Debug: 440 Hz burst through master bus (not a separate context). */
+  playTestTone(hz = 440, durationSec = 1): void {
+    const osc = this.ctx.createOscillator();
+    osc.frequency.value = hz;
+    const gain = this.ctx.createGain();
+    gain.gain.value = 0.15;
+    osc.connect(gain).connect(this.master);
+    const now = this.ctx.currentTime;
+    osc.start(now);
+    osc.stop(now + durationSec);
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
