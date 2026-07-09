@@ -16,7 +16,8 @@
     "seed:dev": "tsx scripts/seed-dev-user.ts",
     "verify:phase1": "tsx scripts/verify-phase1.ts",
     "resynth:check": "tsx scripts/resynth-check.ts",
-    "compile:once": "tsx scripts/compile-once.ts"
+    "compile:once": "tsx scripts/compile-once.ts",
+    "tts:sample": "tsx scripts/tts-sample.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",

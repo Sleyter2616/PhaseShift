@@ -1,13 +1,6 @@
 import type { Manifest, ManifestSegment } from "../contracts/manifest";
 import { dedupeKey } from "../tts/dedupe";
-
-export const PHASE1_SYNTHESIS_IDENTITY = {
-  provider: "selfhost" as const,
-  assetScope: "user" as const,
-  voiceId: "mock-voice",
-  modelId: "mock-1",
-  settings: {} as Record<string, unknown>,
-};
+import type { SynthesisIdentity } from "./synthesis-identity";
 
 export interface SegmentRowInsert {
   script_id: string;
@@ -29,16 +22,20 @@ export interface SegmentRowInsert {
   synthesis_status: "pending";
 }
 
-export function segmentContentHash(text: string): string {
+export function segmentContentHash(text: string, identity: SynthesisIdentity): string {
   return dedupeKey({
-    ...PHASE1_SYNTHESIS_IDENTITY,
+    provider: identity.provider,
+    assetScope: identity.assetScope,
+    voiceId: identity.voiceId,
+    modelId: identity.modelId,
+    settings: identity.settings,
     text,
   });
 }
 
 export function deriveSegmentRows(
   manifest: Manifest,
-  ctx: { scriptId: string; userId: string },
+  ctx: { scriptId: string; userId: string; synthesisIdentity: SynthesisIdentity },
 ): SegmentRowInsert[] {
   const planByPhase = new Map(
     manifest.meta.entrainment_plan.map((entry) => [entry.phase, entry]),
@@ -77,7 +74,7 @@ export function deriveSegmentRows(
       pause_after_ms: segment.pause_after_ms,
       entrainment_hz: plan.hz,
       glide_to_hz: glideTo,
-      content_hash: segmentContentHash(segment.text),
+      content_hash: segmentContentHash(segment.text, ctx.synthesisIdentity),
       synthesis_status: "pending" as const,
     };
   });

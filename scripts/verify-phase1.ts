@@ -2,11 +2,16 @@ import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { collectWordBudgetWarnings } from "../src/lib/contracts/manifest";
+import { countAudioFilesForDedupeKeys } from "../src/lib/pipeline/dedupe-plan";
 import {
   checkIntakeStringsVerbatim,
+  checkPhaseTimingClosure,
   countBannedTokensInTheta,
+  findLongScheduledPauses,
   formatBannedTokenWarning,
+  parseOveragePhases,
 } from "../src/lib/pipeline/phase1-verify";
+import { resolveSynthesisIdentity } from "../src/lib/pipeline/synthesis-identity";
 import { PHASES } from "../src/lib/schedule/reconcile";
 
 function loadEnvLocal(): void {
@@ -51,7 +56,9 @@ async function main() {
 
   const { data: script } = await supabase
     .from("scripts")
-    .select("id, status, user_id, goal_version_id, compiler_input, error_message")
+    .select(
+      "id, status, user_id, goal_version_id, compiler_input, error_message, provider, stock_voice_id, voice_profile_id, tts_model_id",
+    )
     .eq("id", scriptId)
     .single();
 
@@ -61,6 +68,12 @@ async function main() {
   }
 
   allPass &&= pass("status ready", script.status === "ready", script.status);
+
+  const synthesisIdentity = resolveSynthesisIdentity(script);
+  const dedupeCtx = {
+    userId: script.user_id,
+    assetScope: synthesisIdentity.assetScope,
+  };
 
   const { data: segments } = await supabase
     .from("script_segments")
@@ -124,11 +137,23 @@ async function main() {
     script.compiler_input as { session?: { phase_budget_sec?: Record<string, number> } }
   )?.session?.phase_budget_sec;
 
+  const overagePhases = parseOveragePhases(script.error_message);
+
   if (phaseBudget) {
     for (const phase of PHASES) {
       const sum = segs.filter((s) => s.phase === phase).reduce((a, s) => a + s.target_duration_sec, 0);
       const budget = phaseBudget[phase];
       allPass &&= pass(`phase ${phase} target_duration sum`, sum === budget, `${sum} vs ${budget}`);
+    }
+
+    for (const phase of PHASES) {
+      const phaseSegs = segs.filter((s) => s.phase === phase);
+      if (phaseSegs.length === 0) continue;
+      const budget = phaseBudget[phase];
+      if (budget == null) continue;
+
+      const timing = checkPhaseTimingClosure(phaseSegs, budget, overagePhases.has(phase));
+      allPass &&= pass(`phase ${phase} timing closure`, timing.ok, timing.detail);
     }
   } else {
     allPass &&= pass("compiler_input phase_budget_sec present", false);
@@ -145,13 +170,11 @@ async function main() {
     const phaseSegs = segs.filter((s) => s.phase === phase);
     if (phaseSegs.length === 0) continue;
     const negatives = phaseSegs.filter((s) => (s.scheduled_pause_after_ms ?? 0) < 0);
-    const last = phaseSegs.at(-1);
     allPass &&= pass(`phase ${phase} scheduled_pause_after_ms ≥ 0`, negatives.length === 0);
-    allPass &&= pass(
-      `phase ${phase} last segment pause == 0`,
-      last?.scheduled_pause_after_ms === 0,
-      String(last?.scheduled_pause_after_ms),
-    );
+  }
+
+  for (const longPause of findLongScheduledPauses(segs)) {
+    console.log(`WARN scheduled_pause_after_ms > 30s: seq ${longPause.seq} (${longPause.ms}ms)`);
   }
 
   const thetaText = thetaSegs.map((s) => s.text).join(" ");
@@ -164,16 +187,12 @@ async function main() {
   }
 
   const dedupeKeys = [...new Set(segs.map((s) => s.content_hash))];
-  const { count: audioCount } = await supabase
-    .from("audio_files")
-    .select("id", { count: "exact", head: true })
-    .eq("user_id", script.user_id)
-    .in("dedupe_key", dedupeKeys);
+  const audioCount = await countAudioFilesForDedupeKeys(supabase, dedupeCtx, dedupeKeys);
 
   allPass &&= pass(
     "audio_files rows for dedupe keys",
-    (audioCount ?? 0) >= dedupeKeys.length,
-    `count=${audioCount ?? 0} keys=${dedupeKeys.length}`,
+    audioCount >= dedupeKeys.length,
+    `count=${audioCount} keys=${dedupeKeys.length} scope=${dedupeCtx.assetScope}`,
   );
 
   process.exit(allPass ? 0 : 1);

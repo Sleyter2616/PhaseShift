@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   checkIntakeStringsVerbatim,
+  checkPhaseTimingClosure,
   countBannedTokensInTheta,
   formatBannedTokenWarning,
+  parseOveragePhases,
 } from "./phase1-verify";
 
 describe("checkIntakeStringsVerbatim", () => {
@@ -55,6 +57,43 @@ describe("countBannedTokensInTheta", () => {
     const counts = countBannedTokensInTheta("will will someday");
     expect(formatBannedTokenWarning(counts)).toBe(
       "WARN banned tokens in theta text: 3 (will: 2, someday: 1)",
+    );
+  });
+});
+
+describe("phase timing closure (D11)", () => {
+  it("passes when voiced plus pauses are within 2% of budget", () => {
+    const result = checkPhaseTimingClosure(
+      [
+        { actual_duration_sec: 50, scheduled_pause_after_ms: 29_500 },
+        { actual_duration_sec: 40, scheduled_pause_after_ms: 500 },
+      ],
+      120,
+      false,
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it("requires zero scheduled pauses for overage phases and reports overage %", () => {
+    const bad = checkPhaseTimingClosure(
+      [{ actual_duration_sec: 130, scheduled_pause_after_ms: 1000 }],
+      120,
+      true,
+    );
+    expect(bad.ok).toBe(false);
+
+    const good = checkPhaseTimingClosure(
+      [{ actual_duration_sec: 130, scheduled_pause_after_ms: 0 }],
+      120,
+      true,
+    );
+    expect(good.ok).toBe(true);
+    expect(good.overagePct).toBeCloseTo(8.333, 2);
+  });
+
+  it("parses overage phases from script error_message", () => {
+    expect(parseOveragePhases("OVERAGE: phases beta,theta exceed voiced budget by >2%")).toEqual(
+      new Set(["beta", "theta"]),
     );
   });
 });

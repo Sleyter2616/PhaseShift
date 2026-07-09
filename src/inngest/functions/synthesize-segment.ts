@@ -1,9 +1,11 @@
+import { NonRetriableError } from "inngest";
 import { inngest } from "../client";
 import { getServiceClient } from "@/lib/db/service-client";
 import {
   runSynthesizeSegment,
   type SynthesizeSegmentInput,
 } from "@/lib/pipeline/synthesize-segment-job";
+import { TTSProviderError } from "@/lib/tts/errors";
 
 export const synthesizeSegment = inngest.createFunction(
   {
@@ -13,6 +15,13 @@ export const synthesizeSegment = inngest.createFunction(
   },
   async ({ event }) => {
     const supabase = getServiceClient();
-    return runSynthesizeSegment(supabase, event.data as SynthesizeSegmentInput);
+    try {
+      return await runSynthesizeSegment(supabase, event.data as SynthesizeSegmentInput);
+    } catch (error) {
+      if (error instanceof TTSProviderError && !error.retriable) {
+        throw new NonRetriableError(error.message);
+      }
+      throw error;
+    }
   },
 );

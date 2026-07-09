@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { deriveSegmentRows, segmentContentHash, PHASE1_SYNTHESIS_IDENTITY } from "./segment-rows";
+import { deriveSegmentRows, segmentContentHash } from "./segment-rows";
 import type { Manifest } from "../contracts/manifest";
+import type { SynthesisIdentity } from "./synthesis-identity";
+
+const TEST_IDENTITY: SynthesisIdentity = {
+  provider: "selfhost",
+  assetScope: "user",
+  voiceId: "mock-voice",
+  modelId: "mock-1",
+  settings: {},
+  storageScopeKey: "user-1",
+};
 
 const fixtureManifest: Manifest = {
   meta: {
@@ -64,7 +74,7 @@ describe("deriveSegmentRows (D5)", () => {
           fixtureManifest.segments[2]!,
         ],
       },
-      { scriptId: "script-1", userId: "user-1" },
+      { scriptId: "script-1", userId: "user-1", synthesisIdentity: TEST_IDENTITY },
     );
 
     expect(rows[0]?.entrainment_hz).toBe(18);
@@ -74,13 +84,13 @@ describe("deriveSegmentRows (D5)", () => {
     expect(rows[2]?.glide_to_hz).toBe(6);
   });
 
-  it("computes content_hash via Phase 1 synthesis identity", () => {
+  it("computes content_hash via synthesis identity", () => {
     const text = "Beta line one.";
     const rows = deriveSegmentRows(
       { ...fixtureManifest, segments: [fixtureManifest.segments[0]!] },
-      { scriptId: "s", userId: "u" },
+      { scriptId: "s", userId: "u", synthesisIdentity: TEST_IDENTITY },
     );
-    expect(rows[0]?.content_hash).toBe(segmentContentHash(text));
-    expect(PHASE1_SYNTHESIS_IDENTITY.voiceId).toBe("mock-voice");
+    expect(rows[0]?.content_hash).toBe(segmentContentHash(text, TEST_IDENTITY));
+    expect(TEST_IDENTITY.voiceId).toBe("mock-voice");
   });
 });

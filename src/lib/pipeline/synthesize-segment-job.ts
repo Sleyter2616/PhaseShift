@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import type { ServiceClient } from "@/lib/db/service-client";
-import { MockTTSProvider } from "@/lib/tts/mock";
+import { getProvider } from "@/lib/tts/registry";
+import {
+  buildStoragePath,
+  resolveSynthesisIdentity,
+  type ScriptVoiceSource,
+} from "./synthesis-identity";
 
 export interface SynthesizeSegmentInput {
   script_id: string;
@@ -9,22 +14,46 @@ export interface SynthesizeSegmentInput {
   dedupe_key: string;
   text: string;
   pacing_wpm: number;
+  previous_text?: string;
+  next_text?: string;
 }
 
 export async function runSynthesizeSegment(
   supabase: ServiceClient,
   input: SynthesizeSegmentInput,
 ): Promise<{ audio_file_id: string; duration_sec: number }> {
-  const { script_id, segment_id, user_id, dedupe_key, text, pacing_wpm } = input;
-  const audioFileId = randomUUID();
-  const storagePath = `${user_id}/${audioFileId}.mp3`;
+  const { script_id, segment_id, dedupe_key, text, pacing_wpm, previous_text, next_text } =
+    input;
 
-  const provider = new MockTTSProvider(pacing_wpm);
+  const { data: script, error: scriptError } = await supabase
+    .from("scripts")
+    .select("provider, stock_voice_id, voice_profile_id, tts_model_id, user_id")
+    .eq("id", script_id)
+    .single();
+
+  if (scriptError || !script) {
+    throw new Error(`script load failed: ${scriptError?.message ?? script_id}`);
+  }
+
+  const identity = resolveSynthesisIdentity(script as ScriptVoiceSource);
+  const audioFileId = randomUUID();
+  const storagePath = buildStoragePath(identity, audioFileId);
+
+  await supabase
+    .from("script_segments")
+    .update({ synthesis_status: "processing" })
+    .eq("id", segment_id)
+    .eq("script_id", script_id);
+
+  const provider = getProvider(identity.provider, { pacingWpm: pacing_wpm });
+
   const result = await provider.synthesize({
     text,
-    voiceId: "mock-voice",
-    modelId: "mock-1",
-    settings: {},
+    voiceId: identity.voiceId,
+    modelId: identity.modelId,
+    settings: identity.settings,
+    previousText: previous_text,
+    nextText: next_text,
   });
 
   const { error: uploadError } = await supabase.storage
@@ -40,10 +69,10 @@ export async function runSynthesizeSegment(
 
   const { error: audioInsertError } = await supabase.from("audio_files").insert({
     id: audioFileId,
-    user_id,
-    asset_scope: "user",
-    provider: "selfhost",
-    dedupe_key,
+    user_id: identity.assetScope === "user" ? script.user_id : null,
+    asset_scope: identity.assetScope,
+    provider: identity.provider,
+    dedupe_key: dedupe_key,
     storage_path: storagePath,
     duration_sec: result.durationSec,
     bytes: result.audio.byteLength,

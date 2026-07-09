@@ -1,9 +1,14 @@
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { createClient } from "@supabase/supabase-js";
-import { applyDedupeHits, planSegmentDedupe } from "../src/lib/pipeline/dedupe-plan";
+import {
+  applyDedupeHits,
+  countAudioFilesForDedupeKeys,
+  planSegmentDedupe,
+} from "../src/lib/pipeline/dedupe-plan";
 import { resynthPreconditionError } from "../src/lib/pipeline/resynth-guard";
 import { runSynthesizeSegment } from "../src/lib/pipeline/synthesize-segment-job";
+import { resolveSynthesisIdentity } from "../src/lib/pipeline/synthesis-identity";
 
 function loadEnvLocal(): void {
   const envPath = resolve(process.cwd(), ".env.local");
@@ -40,7 +45,7 @@ async function main() {
 
   const { data: script } = await supabase
     .from("scripts")
-    .select("id, user_id, status")
+    .select("id, user_id, status, provider, stock_voice_id, voice_profile_id, tts_model_id")
     .eq("id", scriptId)
     .single();
 
@@ -49,9 +54,15 @@ async function main() {
     process.exit(1);
   }
 
+  const synthesisIdentity = resolveSynthesisIdentity(script);
+  const dedupeCtx = {
+    userId: script.user_id,
+    assetScope: synthesisIdentity.assetScope,
+  };
+
   const { data: segments } = await supabase
     .from("script_segments")
-    .select("id, content_hash, text, pacing_wpm")
+    .select("id, content_hash, text, pacing_wpm, seq")
     .eq("script_id", scriptId)
     .order("seq");
 
@@ -62,40 +73,44 @@ async function main() {
   }
 
   const dedupeKeys = [...new Set((segments ?? []).map((s) => s.content_hash))];
+  const beforeCount = await countAudioFilesForDedupeKeys(supabase, dedupeCtx, dedupeKeys);
 
-  const { count: beforeCount } = await supabase
-    .from("audio_files")
-    .select("id", { count: "exact", head: true })
-    .eq("user_id", script.user_id)
-    .in("dedupe_key", dedupeKeys);
-
-  const plan = await planSegmentDedupe(supabase, script.user_id, segments ?? []);
+  const plan = await planSegmentDedupe(supabase, dedupeCtx, segments ?? []);
   await applyDedupeHits(supabase, plan.hits);
 
   if (plan.misses.length > 0) {
+    const ordered = [...(segments ?? [])].sort((a, b) => a.seq - b.seq);
     await Promise.all(
-      plan.misses.map((miss) =>
-        runSynthesizeSegment(supabase, {
+      plan.misses.map((miss) => {
+        const orderedIndex = ordered.findIndex((segment) => segment.id === miss.segmentId);
+        const previousText =
+          orderedIndex > 0 ? ordered[orderedIndex - 1]?.text : undefined;
+        const nextText =
+          orderedIndex >= 0 && orderedIndex < ordered.length - 1
+            ? ordered[orderedIndex + 1]?.text
+            : undefined;
+
+        return runSynthesizeSegment(supabase, {
           script_id: scriptId,
           segment_id: miss.segmentId,
           user_id: script.user_id,
           dedupe_key: miss.contentHash,
           text: miss.text,
           pacing_wpm: miss.pacingWpm,
-        }),
-      ),
+          previous_text: previousText,
+          next_text: nextText,
+        });
+      }),
     );
   }
 
-  const { count: afterCount } = await supabase
-    .from("audio_files")
-    .select("id", { count: "exact", head: true })
-    .eq("user_id", script.user_id)
-    .in("dedupe_key", dedupeKeys);
+  const afterCount = await countAudioFilesForDedupeKeys(supabase, dedupeCtx, dedupeKeys);
 
-  const newRows = (afterCount ?? 0) - (beforeCount ?? 0);
+  const newRows = afterCount - beforeCount;
   const ok = newRows === 0;
-  console.log(`${ok ? "PASS" : "FAIL"} resynth idempotency: ${newRows} new audio_files rows (hits=${plan.hits.length}, misses=${plan.misses.length})`);
+  console.log(
+    `${ok ? "PASS" : "FAIL"} resynth idempotency: ${newRows} new audio_files rows (hits=${plan.hits.length}, misses=${plan.misses.length}, scope=${dedupeCtx.assetScope})`,
+  );
   process.exit(ok ? 0 : 1);
 }
 
