@@ -213,6 +213,8 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
     wakeLockRef.current = null;
   }, []);
 
+  // Never place `stage` (or any per-render value) in the deps of an effect whose
+  // cleanup disposes the engine — React runs cleanup on every dep change.
   const disposeEngine = useCallback((options?: { keepBuffers?: boolean }) => {
     if (tickRef.current) {
       clearInterval(tickRef.current);
@@ -244,10 +246,18 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [requestWakeLock, stage]);
+
+  // Unmount-only teardown — stable callbacks; do not add stage or other render deps.
+  useEffect(
+    () => () => {
       void releaseWakeLock();
       disposeEngine();
-    };
-  }, [disposeEngine, releaseWakeLock, requestWakeLock, stage]);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- unmount-only intent
+    [],
+  );
 
   useEffect(() => {
     if (!IS_DEV || stage !== "readyToPlay") {
