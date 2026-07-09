@@ -162,6 +162,14 @@ export class EntrainmentEngine {
     return this.bedNodes.length > 0;
   }
 
+  getGainLevels(): { master: number; tone: number; voice: number } {
+    return {
+      master: this.master.gain.value,
+      tone: this.toneGain.gain.value,
+      voice: this.voiceGain.gain.value,
+    };
+  }
+
   /** Debug: 440 Hz burst through master bus (not a separate context). */
   playTestTone(hz = 440, durationSec = 1): void {
     const osc = this.ctx.createOscillator();

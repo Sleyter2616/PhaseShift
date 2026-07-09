@@ -39,6 +39,10 @@ interface DebugSnapshot {
   bedActive: boolean;
   mode: EntrainmentMode;
   clock: "alive" | "dead" | "unknown";
+  attempt: 1 | 2 | null;
+  masterGain: number | null;
+  toneGain: number | null;
+  voiceGain: number | null;
 }
 
 const IS_DEV = process.env.NODE_ENV !== "production";
@@ -52,6 +56,10 @@ const EMPTY_DEBUG: DebugSnapshot = {
   bedActive: false,
   mode: "isochronic",
   clock: "unknown",
+  attempt: null,
+  masterGain: null,
+  toneGain: null,
+  voiceGain: null,
 };
 
 function formatTime(sec: number): string {
@@ -109,6 +117,11 @@ function AudioDebugStrip({
         <span>bedActive:{String(debug.bedActive)}</span>
         <span>mode={debug.mode}</span>
         <span>clock:{debug.clock}</span>
+        <span>attempt:{debug.attempt ?? "—"}</span>
+        <span>
+          master:{debug.masterGain?.toFixed(3) ?? "—"} tone:{debug.toneGain?.toFixed(3) ?? "—"}{" "}
+          voice:{debug.voiceGain?.toFixed(3) ?? "—"}
+        </span>
         <button
           type="button"
           disabled={!engineReady}
@@ -155,6 +168,7 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const debugTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const clockStatusRef = useRef<DebugSnapshot["clock"]>("unknown");
+  const attemptRef = useRef<DebugSnapshot["attempt"]>(null);
 
   const updateDebugSnapshot = useCallback(() => {
     const engine = engineRef.current;
@@ -162,6 +176,7 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
     const ctxTime = engine?.audioContext.currentTime ?? null;
     const elapsed =
       sessionStart != null && ctxTime != null ? Math.max(0, ctxTime - sessionStart) : 0;
+    const gains = engine?.getGainLevels();
 
     setDebug({
       ctxState: engine?.audioContext.state ?? "none",
@@ -172,6 +187,10 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
       bedActive: engine?.isBedActive() ?? false,
       mode: engine?.currentMode ?? mode,
       clock: clockStatusRef.current,
+      attempt: attemptRef.current,
+      masterGain: gains?.master ?? null,
+      toneGain: gains?.tone ?? null,
+      voiceGain: gains?.voice ?? null,
     });
   }, [mode]);
 
@@ -201,6 +220,10 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
     }
     engineRef.current?.dispose();
     engineRef.current = null;
+    if (IS_DEV) {
+      delete (window as Window & { __psEngine?: EntrainmentEngine }).__psEngine;
+    }
+    attemptRef.current = null;
     decodeWindowRef.current.dispose();
     decodeWindowRef.current = new JitDecodeWindow(3);
     if (!options?.keepBuffers) {
@@ -402,6 +425,10 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
 
     engineRef.current = engine;
     clockStatusRef.current = "alive";
+    attemptRef.current = attempt1 && "engine" in attempt1 ? 1 : 2;
+    if (IS_DEV) {
+      (window as Window & { __psEngine?: EntrainmentEngine }).__psEngine = engine;
+    }
     void requestWakeLock();
     engine.startBed(initialBeatHz);
     sessionStartCtxTimeRef.current = engine.audioContext.currentTime;
