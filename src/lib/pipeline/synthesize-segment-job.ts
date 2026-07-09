@@ -7,6 +7,24 @@ import {
   type ScriptVoiceSource,
 } from "./synthesis-identity";
 
+export const UPLOAD_RETRY_BACKOFF_MS = [500, 1500] as const;
+
+export async function uploadAudioWithRetry(
+  uploadFn: () => Promise<{ error: { message: string } | null }>,
+  sleepFn: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+): Promise<void> {
+  const maxAttempts = UPLOAD_RETRY_BACKOFF_MS.length + 1;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const { error } = await uploadFn();
+    if (!error) return;
+    if (attempt === maxAttempts - 1) {
+      throw new Error(`storage upload failed: ${error.message}`);
+    }
+    await sleepFn(UPLOAD_RETRY_BACKOFF_MS[attempt]!);
+  }
+}
+
 export interface SynthesizeSegmentInput {
   script_id: string;
   segment_id: string;
@@ -56,16 +74,12 @@ export async function runSynthesizeSegment(
     nextText: next_text,
   });
 
-  const { error: uploadError } = await supabase.storage
-    .from("audio")
-    .upload(storagePath, result.audio, {
+  await uploadAudioWithRetry(() =>
+    supabase.storage.from("audio").upload(storagePath, result.audio, {
       contentType: "audio/mpeg",
       upsert: false,
-    });
-
-  if (uploadError) {
-    throw new Error(`storage upload failed: ${uploadError.message}`);
-  }
+    }),
+  );
 
   const { error: audioInsertError } = await supabase.from("audio_files").insert({
     id: audioFileId,

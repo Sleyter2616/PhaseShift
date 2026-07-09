@@ -49,10 +49,19 @@ export function reconcilePhaseTiming(input: ReconcileInput): ReconcileResult {
         reconciled.push(s);
       }
     } else {
-      const perGap = Math.round(remainingMs / Math.max(1, segments.length - 1));
-      for (const [i, s] of segments.entries()) {
-        s.scheduled_pause_after_ms = i === segments.length - 1 ? 0 : perGap;
-        reconciled.push(s);
+      const count = segments.length;
+      if (count > 0) {
+        const perGap = Math.round(remainingMs / count);
+        let assigned = 0;
+        for (const [i, s] of segments.entries()) {
+          if (i === count - 1) {
+            s.scheduled_pause_after_ms = Math.max(0, remainingMs - assigned);
+          } else {
+            s.scheduled_pause_after_ms = perGap;
+            assigned += perGap;
+          }
+          reconciled.push(s);
+        }
       }
     }
   }
