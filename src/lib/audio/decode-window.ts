@@ -2,11 +2,9 @@
 export class JitDecodeWindow {
   private readonly alive = new Map<number, unknown>();
   private readonly order: number[] = [];
-  private readonly offlineCtx: OfflineAudioContext;
+  private offlineCtx: OfflineAudioContext | null = null;
 
-  constructor(private readonly maxAlive = 3) {
-    this.offlineCtx = new OfflineAudioContext(1, 1, 44_100);
-  }
+  constructor(private readonly maxAlive = 3) {}
 
   has(seq: number): boolean {
     return this.alive.has(seq);
@@ -18,7 +16,7 @@ export class JitDecodeWindow {
 
   async decode(compressed: ArrayBuffer): Promise<AudioBuffer> {
     const copy = compressed.slice(0);
-    return this.offlineCtx.decodeAudioData(copy);
+    return this.getOfflineCtx().decodeAudioData(copy);
   }
 
   markDecoded(seq: number, buffer: unknown): void {
@@ -56,8 +54,20 @@ export class JitDecodeWindow {
   }
 
   dispose(): void {
+    if (!this.offlineCtx) return;
     const close = (this.offlineCtx as unknown as { close?: () => Promise<void> }).close;
     if (close) void close.call(this.offlineCtx);
+    this.offlineCtx = null;
+  }
+
+  private getOfflineCtx(): OfflineAudioContext {
+    if (!this.offlineCtx) {
+      if (typeof OfflineAudioContext === "undefined") {
+        throw new Error("decode requires a browser context");
+      }
+      this.offlineCtx = new OfflineAudioContext(1, 1, 44_100);
+    }
+    return this.offlineCtx;
   }
 
   private evictIfNeeded(): void {

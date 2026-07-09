@@ -45,4 +45,15 @@ describe("JitDecodeWindow", () => {
     const targets = window.decodeTargets(2, [3, 4]);
     expect(targets).toEqual([2, 3, 4]);
   });
+
+  it("throws when decode is called without OfflineAudioContext", async () => {
+    const original = globalThis.OfflineAudioContext;
+    // @ts-expect-error test teardown
+    delete globalThis.OfflineAudioContext;
+    const window = new JitDecodeWindow(3);
+    await expect(window.decode(new ArrayBuffer(0))).rejects.toThrow(
+      "decode requires a browser context",
+    );
+    globalThis.OfflineAudioContext = original;
+  });
 });
