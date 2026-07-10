@@ -108,7 +108,35 @@ curl -s http://localhost:3000/api/scripts/<script_id>/manifest \
   -H "x-dev-secret: $DEV_API_SECRET" | jq .
 ```
 
-Returns ordered segments with `signedUrl` (24h TTL) plus script meta.
+Returns ordered segments with `signedUrl` (24h TTL) plus script meta (`entrainment_mode`, `entrainment_plan`).
+
+## Phase 3 — Session playback
+
+Open a ready script in the browser player (manifest loaded server-side; no dev secret in the client):
+
+```
+http://localhost:3000/session/<script_id>
+```
+
+Use one of the cached `ready` scripts from Phase 2 synthesis (zero new TTS/LLM spend).
+
+### Desktop smoke test
+
+1. Begin → confirm voice over entrainment tone bed.
+2. Listen for beat glide at the alpha→theta phase boundary.
+3. Pause / resume.
+4. End → rate alertness 1–5 → verify `sessions.exit_alertness` in Supabase.
+
+### Device testing (iPhone Safari, secure context)
+
+Wake Lock requires HTTPS. Run the dev server with the experimental flag and open the LAN URL on your phone:
+
+```bash
+pnpm dev -- --experimental-https
+# or: npx next dev --turbopack --experimental-https
+```
+
+Accept the self-signed certificate on the phone, then open `https://<your-lan-ip>:3000/session/<script_id>`. Keep the session screen in the foreground for at least 10 minutes; wake lock should prevent the screen from dimming.
 
 ## Commands
 
@@ -130,6 +158,9 @@ src/
   app/api/scripts/        POST intake, GET manifest
   app/api/inngest/        Inngest serve endpoint
   app/dev/scripts/[id]/   Dev status page (poll)
+  app/session/[scriptId]/ Server-loaded manifest + client player
+  lib/audio/              EntrainmentEngine, scheduler, JIT decode window
+  lib/playback/           Shared manifest loader for API + session page
   inngest/functions/      generate-script, synthesize-segment
   lib/compiler/           Claude compile + retry
   lib/contracts/          intake + manifest Zod
