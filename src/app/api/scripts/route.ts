@@ -1,8 +1,9 @@
 import { z } from "zod";
 import { NextResponse } from "next/server";
-import { assertDevAuth, DevAuthError, devAuthErrorResponse } from "@/lib/auth/dev-secret";
+import { isInsufficientCreditsError } from "@/lib/auth/session";
 import { intakeSchema } from "@/lib/contracts/intake";
 import { PROMPT_VERSION } from "@/lib/compiler/prompt.v1.3";
+import { GENERATION_COST_CREDITS } from "@/lib/costs";
 import { getServiceClient } from "@/lib/db/service-client";
 import { inngest } from "@/inngest/client";
 import { buildCompilerInput } from "@/lib/session/derive";
@@ -10,13 +11,22 @@ import {
   defaultTtsModelId,
   defaultTtsProvider,
 } from "@/lib/pipeline/synthesis-identity";
+import { createClient } from "@/lib/supabase/server";
 
 export async function POST(request: Request) {
   try {
-    const userId = assertDevAuth(request);
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
+
+    const userId = user.id;
     const body: unknown = await request.json();
     const intake = intakeSchema.parse(body);
-    const supabase = getServiceClient();
 
     const provider = defaultTtsProvider();
     const ttsModelId = defaultTtsModelId();
@@ -116,6 +126,23 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: scriptError?.message ?? "script insert failed" }, { status: 500 });
     }
 
+    const { error: spendError } = await supabase.rpc("spend_credits", {
+      p_script: script.id,
+      p_amount: GENERATION_COST_CREDITS,
+      p_reason: "generation",
+    });
+
+    if (spendError) {
+      if (isInsufficientCreditsError(spendError)) {
+        await supabase
+          .from("scripts")
+          .update({ status: "failed", error_message: "insufficient_credits" })
+          .eq("id", script.id);
+        return NextResponse.json({ error: "insufficient_credits" }, { status: 402 });
+      }
+      return NextResponse.json({ error: spendError.message }, { status: 500 });
+    }
+
     try {
       await inngest.send({
         name: "script/generate.requested",
@@ -124,6 +151,12 @@ export async function POST(request: Request) {
     } catch (enqueueError) {
       const message =
         enqueueError instanceof Error ? enqueueError.message : "unknown enqueue error";
+      const service = getServiceClient();
+      await service.rpc("refund_credits", {
+        p_user: userId,
+        p_script: script.id,
+        p_amount: GENERATION_COST_CREDITS,
+      });
       await supabase
         .from("scripts")
         .update({ status: "failed", error_message: `enqueue_failed: ${message}`.slice(0, 4000) })
@@ -134,9 +167,6 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ script_id: script.id }, { status: 202 });
   } catch (error) {
-    if (error instanceof DevAuthError) {
-      return devAuthErrorResponse();
-    }
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: error.flatten() }, { status: 400 });
     }

@@ -7,6 +7,7 @@ See the full execution plan in [`docs/blueprint.md`](docs/blueprint.md).
 ## Stack
 
 - **Runtime:** Next.js 15 (App Router), React 19, TypeScript (strict), Zod
+- **Auth:** Supabase Auth via `@supabase/ssr` (cookie sessions, RLS-scoped clients)
 - **Jobs:** Inngest (generation pipeline)
 - **Database:** Supabase (Postgres + Storage)
 - **LLM:** Anthropic Claude (compiler); **TTS:** ElevenLabs via raw `fetch` (Phase 2; `selfhost` mock for offline CI)
@@ -16,9 +17,9 @@ See the full execution plan in [`docs/blueprint.md`](docs/blueprint.md).
 
 - Node.js ≥ 22 (`nvm use`)
 - pnpm 9+
-- Hosted Supabase dev project with migrations `0001`–`0006` applied
+- Hosted Supabase dev project with migrations `0001`–`0007` applied
 - [Anthropic API key](https://console.anthropic.com/)
-- [ElevenLabs API key](https://elevenlabs.io/) (Phase 2 live synthesis)
+- [ElevenLabs API key](https://elevenlabs.io/) (Phase 2 live synthesis; optional when `TTS_PROVIDER=selfhost`)
 - [Inngest dev server](https://www.inngest.com/docs/local-development)
 
 ## Environment
@@ -28,29 +29,20 @@ Copy `.env.example` to `.env.local` and fill in:
 | Variable | Purpose |
 | -------- | ------- |
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
-| `SUPABASE_SERVICE_ROLE_KEY` | Server-only DB + storage writes |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Browser + user-scoped server client |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server-only admin (signed URLs, refunds, jobs) |
 | `ANTHROPIC_API_KEY` | Claude compiler |
 | `ELEVENLABS_API_KEY` | ElevenLabs TTS (live synthesis) |
 | `ELEVENLABS_STOCK_VOICE_ID` | Default stock voice for `POST /api/scripts` |
 | `ELEVENLABS_MODEL_ID` | Default `eleven_flash_v2_5` |
-| `TTS_PROVIDER` | `elevenlabs` (default) or `selfhost` for offline mock |
+| `TTS_PROVIDER` | `elevenlabs` (default) or `selfhost` for zero ElevenLabs spend |
 | `LLM_MODEL` | Default `claude-sonnet-4-6` |
-| `DEV_USER_ID` | From seed script (Phase 1 dev auth) |
-| `DEV_API_SECRET` | Shared secret for `x-dev-secret` header |
+| `DEV_USER_PASSWORD` | Optional; seed script sets dev user password (printed if unset) |
 | `INNGEST_EVENT_KEY` / `INNGEST_SIGNING_KEY` | Inngest Cloud (optional for local dev) |
 
-## Local development (Phase 2)
+## Local development
 
-> **Cost warning:** A full 40-minute generation synthesizes every segment via ElevenLabs and can consume substantial API credits. Use `TTS_PROVIDER=selfhost` for zero-cost offline pipeline tests, and run `pnpm tts:sample` first to validate voice/model choice before a full compile.
-
-### 0. S1 voice bake-off (optional, recommended)
-
-```bash
-pnpm tts:sample <elevenlabs_voice_id> [model_id]
-# writes ./samples/<voiceId>-<modelId>.mp3 — play locally before full generation
-```
-
-Set `ELEVENLABS_STOCK_VOICE_ID` in `.env.local` to the winning voice.
+> **Cost warning:** A full 40-minute generation synthesizes every segment via ElevenLabs and can consume substantial API credits. Set `TTS_PROVIDER=selfhost` for **zero ElevenLabs spend** on acceptance runs (LLM compiler cost still applies, ~$0.25 per generation).
 
 ### 1. Install and test (offline)
 
@@ -59,15 +51,19 @@ pnpm install
 pnpm typecheck && pnpm lint && pnpm test
 ```
 
-### 2. Seed dev user
+### 2. Apply migrations
+
+Apply `supabase/migrations/0001` through `0007` on your hosted Supabase project (including `0007_auth.sql` for the signup profile trigger and `refund_credits`).
+
+### 3. Seed dev user
 
 ```bash
-pnpm tsx scripts/seed-dev-user.ts
+pnpm seed:dev
 ```
 
-Copy the printed `DEV_USER_ID` into `.env.local`. Set `DEV_API_SECRET` to any long random string.
+Sign in at `http://localhost:3000/login` with `dev@phaseshift.local` and the printed `DEV_USER_PASSWORD`.
 
-### 3. Start services (two terminals)
+### 4. Start services (two terminals)
 
 ```bash
 # Terminal A — Next.js
@@ -77,66 +73,69 @@ pnpm dev
 npx inngest-cli@latest dev -u http://localhost:3000/api/inngest
 ```
 
-### 4. Request generation
+### 5. Sign in and browse scripts
+
+Open `http://localhost:3000` → redirects to `/login` or `/scripts`. After sign-in, `/scripts` lists your scripts with links to playback.
+
+### 6. Request generation (authenticated)
+
+Sign in in the browser, then POST with your session cookie (or use a REST client that forwards cookies):
 
 ```bash
 curl -s -X POST http://localhost:3000/api/scripts \
   -H "Content-Type: application/json" \
-  -H "x-dev-secret: $DEV_API_SECRET" \
+  -b "your-session-cookies" \
   -d "$(pnpm tsx -e "import { intake40Min } from './src/lib/fixtures/intake.ts'; process.stdout.write(JSON.stringify(intake40Min))")"
 ```
 
-v0 ships the **40-minute** golden path (`intake40Min` in `src/lib/fixtures/intake.ts`). The 20-minute fixture remains for unit tests only.
+With `TTS_PROVIDER=selfhost`, generation enqueues without ElevenLabs API spend. Each generation spends `GENERATION_COST_CREDITS` (1) via `spend_credits` RPC.
 
-Expect `202` with `{ "script_id": "..." }`.
+Expect `202` with `{ "script_id": "..." }`, or `402` with `{ "error": "insufficient_credits" }`.
 
-### 5. Watch progress
+### 7. Watch progress
 
 Open `http://localhost:3000/dev/scripts/<script_id>` (polls every 2s).
 
-### 6. Verify
+### 8. Verify pipeline
 
 ```bash
-pnpm tsx scripts/verify-phase1.ts <script_id>
-pnpm tsx scripts/resynth-check.ts <script_id>
+pnpm verify:phase1 <script_id>
+pnpm resynth:check <script_id>
 ```
 
-### 7. Playback manifest (Phase 3 contract)
+### 9. RLS and credits acceptance (after 0007 applied)
 
 ```bash
-curl -s http://localhost:3000/api/scripts/<script_id>/manifest \
-  -H "x-dev-secret: $DEV_API_SECRET" | jq .
+pnpm rls:e2e
+pnpm credits:concurrency
 ```
 
-Returns ordered segments with `signedUrl` (24h TTL) plus script meta (`entrainment_mode`, `entrainment_plan`).
+Both print `PASS`/`FAIL` lines and clean up throwaway users.
 
-## Phase 3 — Session playback
-
-Open a ready script in the browser player (manifest loaded server-side; no dev secret in the client):
+### 10. Session playback
 
 ```
 http://localhost:3000/session/<script_id>
 ```
 
-Use one of the cached `ready` scripts from Phase 2 synthesis (zero new TTS/LLM spend).
+Requires sign-in; foreign scripts return 404 via RLS.
+
+## Phase 3 — Session playback notes
 
 ### Desktop smoke test
 
-1. Begin → confirm voice over entrainment tone bed.
+1. Begin → **Start audio** → voice over entrainment tone bed.
 2. Listen for beat glide at the alpha→theta phase boundary.
 3. Pause / resume.
-4. End → rate alertness 1–5 → verify `sessions.exit_alertness` in Supabase.
+4. End → rate alertness 1–5.
 
 ### Device testing (iPhone Safari, secure context)
 
-Wake Lock requires HTTPS. Run the dev server with the experimental flag and open the LAN URL on your phone:
-
 ```bash
 pnpm dev -- --experimental-https
-# or: npx next dev --turbopack --experimental-https
 ```
 
-Accept the self-signed certificate on the phone, then open `https://<your-lan-ip>:3000/session/<script_id>`. Keep the session screen in the foreground for at least 10 minutes; wake lock should prevent the screen from dimming.
+Open `https://<your-lan-ip>:3000/session/<script_id>` and keep the screen in the foreground.
 
 ## Commands
 
@@ -146,29 +145,34 @@ Accept the self-signed certificate on the phone, then open `https://<your-lan-ip
 | `pnpm typecheck` | `tsc --noEmit` |
 | `pnpm lint` | ESLint |
 | `pnpm test` | Vitest unit tests |
-| `pnpm tsx scripts/seed-dev-user.ts` | Create dev auth user + profile |
-| `pnpm tsx scripts/verify-phase1.ts <id>` | Phase 1 acceptance checks |
-| `pnpm tsx scripts/resynth-check.ts <id>` | Dedupe idempotency check |
+| `pnpm seed:dev` | Create dev auth user + profile (100 credits) |
+| `pnpm rls:e2e` | RLS isolation acceptance script |
+| `pnpm credits:concurrency` | `spend_credits` FOR UPDATE lock proof |
+| `pnpm verify:phase1 <id>` | Phase 1 acceptance checks |
+| `pnpm resynth:check <id>` | Dedupe idempotency check |
 | `pnpm tts:sample <voiceId> [modelId]` | S1 bake-off: ~75s excerpt MP3 |
 
 ## Repo map
 
 ```
 src/
-  app/api/scripts/        POST intake, GET manifest
+  app/api/scripts/        POST intake (auth + spend_credits), GET manifest
   app/api/inngest/        Inngest serve endpoint
-  app/dev/scripts/[id]/   Dev status page (poll)
+  app/login/              Sign-in / sign-up
+  app/scripts/            User's script list (RLS-scoped)
   app/session/[scriptId]/ Server-loaded manifest + client player
+  app/dev/scripts/[id]/   Dev status page (poll)
+  lib/supabase/           @supabase/ssr browser/server/middleware clients
+  lib/auth/               Session helpers, ownership checks
   lib/audio/              EntrainmentEngine, scheduler, JIT decode window
-  lib/playback/           Shared manifest loader for API + session page
+  lib/playback/           Shared manifest loader
   inngest/functions/      generate-script, synthesize-segment
   lib/compiler/           Claude compile + retry
   lib/contracts/          intake + manifest Zod
   lib/pipeline/           segment derivation, dedupe, reconcile
   lib/tts/                ElevenLabs + selfhost providers
-  lib/session/derive.ts   intake → compiler INPUT session block
-scripts/                  seed, verify, resynth-check, tts-sample
-supabase/migrations/      0001–0006
+scripts/                  seed, rls-e2e, credits-concurrency, verify
+supabase/migrations/      0001–0007
 ```
 
 ## Roadmap

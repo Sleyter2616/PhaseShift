@@ -1,21 +1,6 @@
-import { readFileSync, existsSync } from "node:fs";
-import { resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
-
-function loadEnvLocal(): void {
-  const envPath = resolve(process.cwd(), ".env.local");
-  if (!existsSync(envPath)) return;
-  for (const line of readFileSync(envPath, "utf8").split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const eq = trimmed.indexOf("=");
-    if (eq === -1) continue;
-    const key = trimmed.slice(0, eq).trim();
-    const value = trimmed.slice(eq + 1).trim();
-    if (!(key in process.env)) process.env[key] = value;
-  }
-}
+import { loadEnvLocal } from "./load-env";
 
 loadEnvLocal();
 
@@ -32,7 +17,8 @@ const supabase = createClient(url, serviceKey, {
 });
 
 const email = "dev@phaseshift.local";
-const password = randomBytes(16).toString("base64url");
+const password =
+  process.env.DEV_USER_PASSWORD ?? `phase-shift-dev-${randomBytes(8).toString("hex")}`;
 
 async function main() {
   const { data: listData } = await supabase.auth.admin.listUsers();
@@ -41,6 +27,11 @@ async function main() {
   let userId: string;
   if (existing) {
     userId = existing.id;
+    const { error: updateError } = await supabase.auth.admin.updateUserById(userId, { password });
+    if (updateError) {
+      console.error("updateUser password failed:", updateError.message);
+      process.exit(1);
+    }
     console.log(`User already exists: ${userId}`);
   } else {
     const { data, error } = await supabase.auth.admin.createUser({
@@ -54,7 +45,6 @@ async function main() {
     }
     userId = data.user.id;
     console.log(`Created user ${email}`);
-    console.log(`Password (save once): ${password}`);
   }
 
   const { error: profileError } = await supabase.from("profiles").upsert({
@@ -68,8 +58,9 @@ async function main() {
     process.exit(1);
   }
 
-  console.log("\nSet in .env.local:");
-  console.log(`DEV_USER_ID=${userId}`);
+  console.log("\nSign in at http://localhost:3000/login");
+  console.log(`Email: ${email}`);
+  console.log(`DEV_USER_PASSWORD=${password}`);
 }
 
 main().catch((error) => {
