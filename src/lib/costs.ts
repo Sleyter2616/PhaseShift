@@ -21,6 +21,9 @@ export type DurationPreset = keyof typeof PHASE_BUDGET_SEC;
 /** §2.3 — ~27,000 billable characters per 40-min full generation */
 export const BILLABLE_CHARS_40MIN = 27_000;
 
+/** §5 — 1 credit = one Flash generation (blueprint §5 top-up) */
+export const GENERATION_COST_CREDITS = 1;
+
 /** §5 — Credits per full 40-minute generation by model tier */
 export const CREDITS_FULL_GENERATION = {
   flash: 13_500,
