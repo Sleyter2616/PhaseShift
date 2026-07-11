@@ -18,7 +18,9 @@ import {
   validateWizardStep,
   type WizardDraft,
 } from "@/lib/contracts/wizard";
+import { WIZARD_STEP_COPY } from "@/lib/contracts/wizard-copy";
 import { ChipInput } from "./chip-input";
+import { FieldExplainer, StepExplainer } from "./step-explainer";
 
 const STEP_COUNT = 7;
 const FEATURE_LINT_MESSAGE =
@@ -156,7 +158,9 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
 
       {step === 1 ? (
         <section className="space-y-3">
-          <label className="block text-sm font-medium" htmlFor="goal">
+          <h2 className="text-sm font-medium">{WIZARD_STEP_COPY[1]!.heading}</h2>
+          <StepExplainer text={WIZARD_STEP_COPY[1]!.description} />
+          <label className="sr-only" htmlFor="goal">
             Goal statement
           </label>
           <textarea
@@ -165,7 +169,7 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
             value={draft.goal_statement}
             onChange={(event) => updateDraft({ goal_statement: event.target.value })}
             className="w-full rounded border border-neutral-300 px-3 py-2 text-sm"
-            placeholder="Present-tense declaration of your goal"
+            placeholder={WIZARD_STEP_COPY[1]!.fields!.goal_statement!.placeholder}
           />
           <p className="text-xs text-neutral-500">{goalCharCount} / 280 characters</p>
           {showRewriteChip ? (
@@ -184,6 +188,8 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
 
       {step === 2 ? (
         <section className="space-y-4">
+          <h2 className="text-sm font-medium">{WIZARD_STEP_COPY[2]!.heading}</h2>
+          <StepExplainer text={WIZARD_STEP_COPY[2]!.description} />
           <div>
             <p className="mb-2 text-sm font-medium">Timeframe</p>
             <div className="flex flex-wrap gap-2">
@@ -228,7 +234,8 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
             />
           </div>
           <div>
-            <label className="block text-sm font-medium" htmlFor="place">
+            <p className="text-sm font-medium">{WIZARD_STEP_COPY[2]!.fields!.place!.heading}</p>
+            <label className="sr-only" htmlFor="place">
               Place
             </label>
             <input
@@ -240,52 +247,67 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
                   localization: { ...draft.localization, place: event.target.value },
                 })
               }
+              placeholder={WIZARD_STEP_COPY[2]!.fields!.place!.placeholder}
               className="mt-1 w-full rounded border border-neutral-300 px-3 py-2 text-sm"
             />
-            <p className="mt-1 text-xs text-neutral-500">
-              Name a concrete location (office, street, room) — not abstract feelings.
-            </p>
           </div>
         </section>
       ) : null}
 
       {step === 3 ? (
         <section className="space-y-3">
-          <p className="text-sm font-medium">Prerequisites (exactly 3)</p>
-          {draft.triangulation.map((value, index) => (
-            <input
-              key={index}
-              type="text"
-              value={value}
-              onChange={(event) => {
-                const next = [...draft.triangulation] as [string, string, string];
-                next[index] = event.target.value;
-                updateDraft({ triangulation: next });
-              }}
-              placeholder={`Prerequisite ${index + 1}`}
-              className="w-full rounded border border-neutral-300 px-3 py-2 text-sm"
-            />
-          ))}
+          <h2 className="text-sm font-medium">{WIZARD_STEP_COPY[3]!.heading}</h2>
+          <StepExplainer text={WIZARD_STEP_COPY[3]!.description} />
+          {draft.triangulation.map((value, index) => {
+            const fieldKey = `prerequisite${index + 1}` as
+              | "prerequisite1"
+              | "prerequisite2"
+              | "prerequisite3";
+            return (
+              <input
+                key={index}
+                type="text"
+                value={value}
+                onChange={(event) => {
+                  const next = [...draft.triangulation] as [string, string, string];
+                  next[index] = event.target.value;
+                  updateDraft({ triangulation: next });
+                }}
+                placeholder={WIZARD_STEP_COPY[3]!.fields![fieldKey]!.placeholder}
+                className="w-full rounded border border-neutral-300 px-3 py-2 text-sm"
+              />
+            );
+          })}
         </section>
       ) : null}
 
       {step === 4 ? (
         <section className="space-y-6">
+          <h2 className="text-sm font-medium">{WIZARD_STEP_COPY[4]!.heading}</h2>
+          <StepExplainer text={WIZARD_STEP_COPY[4]!.description} />
           <div>
-            <p className="mb-2 text-sm font-medium">Not list (2–5)</p>
+            <p className="mb-1 text-sm font-medium">
+              {WIZARD_STEP_COPY[4]!.fields!.not_list!.heading}
+            </p>
+            <FieldExplainer text={WIZARD_STEP_COPY[4]!.fields!.not_list!.description} />
             <ChipInput
               values={draft.not_list}
               onChange={(not_list) => updateDraft({ not_list })}
               minItems={2}
               maxItems={5}
+              placeholder={WIZARD_STEP_COPY[4]!.fields!.not_list!.placeholder}
             />
           </div>
           <div>
-            <p className="mb-2 text-sm font-medium">Wrong-direction pulls (0–3)</p>
+            <p className="mb-1 text-sm font-medium">
+              {WIZARD_STEP_COPY[4]!.fields!.wrong_pulls!.heading}
+            </p>
+            <FieldExplainer text={WIZARD_STEP_COPY[4]!.fields!.wrong_pulls!.description} />
             <ChipInput
               values={draft.wrong_pulls}
               onChange={(wrong_pulls) => updateDraft({ wrong_pulls })}
               maxItems={3}
+              placeholder={WIZARD_STEP_COPY[4]!.fields!.wrong_pulls!.placeholder}
             />
           </div>
         </section>
@@ -293,12 +315,14 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
 
       {step === 5 ? (
         <section className="space-y-3">
-          <p className="text-sm font-medium">Observable features (3–7)</p>
+          <h2 className="text-sm font-medium">{WIZARD_STEP_COPY[5]!.heading}</h2>
+          <StepExplainer text={WIZARD_STEP_COPY[5]!.description} />
           <ChipInput
             values={draft.features}
             onChange={(features) => updateDraft({ features })}
             minItems={3}
             maxItems={7}
+            placeholder={WIZARD_STEP_COPY[5]!.fields!.features!.placeholder}
             getItemError={(value) =>
               hasConcreteNounToken(value) ? null : FEATURE_LINT_MESSAGE
             }
@@ -308,7 +332,8 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
 
       {step === 6 ? (
         <section className="space-y-4">
-          <p className="text-sm font-medium">Sync actions (1–5)</p>
+          <h2 className="text-sm font-medium">{WIZARD_STEP_COPY[6]!.heading}</h2>
+          <StepExplainer text={WIZARD_STEP_COPY[6]!.description} />
           {draft.sync_actions.map((item, index) => (
             <div key={index} className="space-y-2 rounded border border-neutral-200 p-3">
               <input
@@ -319,7 +344,7 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
                   sync_actions[index] = { ...item, action: event.target.value };
                   updateDraft({ sync_actions });
                 }}
-                placeholder="Action text"
+                placeholder={WIZARD_STEP_COPY[6]!.fields!.action!.placeholder}
                 className="w-full rounded border border-neutral-300 px-3 py-2 text-sm"
               />
               <input
@@ -333,6 +358,7 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
                   };
                   updateDraft({ sync_actions });
                 }}
+                title={WIZARD_STEP_COPY[6]!.fields!.deadline!.placeholder}
                 className="rounded border border-neutral-300 px-3 py-2 text-sm"
               />
               {draft.sync_actions.length > 1 ? (
@@ -368,6 +394,8 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
 
       {step === 7 ? (
         <section className="space-y-5">
+          <h2 className="text-sm font-medium">{WIZARD_STEP_COPY[7]!.heading}</h2>
+          <StepExplainer text={WIZARD_STEP_COPY[7]!.description} />
           <div>
             <p className="text-sm font-medium">Duration</p>
             <p className="mt-1 rounded border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm">
