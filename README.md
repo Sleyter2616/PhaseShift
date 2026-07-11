@@ -120,6 +120,26 @@ http://localhost:3000/session/<script_id>
 
 Requires sign-in; foreign scripts return 404 via RLS.
 
+## Phase 4b — Intake wizard and voice onboarding
+
+### Intake wizard (`/wizard`)
+
+Seven-step client flow (auth required). Per-step validation uses partial Zod schemas from `src/lib/contracts/intake.ts`; submit runs full `intakeSchema.parse` then `POST /api/scripts`.
+
+- Step 7 locks duration at **40 minutes** (v0 preset only).
+- Optional `voice_profile_id` in the POST body selects an owned `ready` voice profile; synthesis uses `provider_voice_id` with `asset_scope: user`.
+- `402 insufficient_credits` renders inline on step 7; `202` redirects to `/dev/scripts/<id>`.
+
+### Voice clone (`/voice`)
+
+Consent screen (own-voice-only, in-app recording, no uploads) → server action sets `voice_profiles.consent_confirmed_at` and `status: pending` → ~90s guided reading with `MediaRecorder` → ElevenLabs instant clone (or mock voice id when `TTS_PROVIDER=selfhost`).
+
+When `status: ready`, the wizard step 7 voice selector shows **My voice**.
+
+### Scripts list
+
+**New script** links to `/wizard`. The golden-fixture shortcut button appears only when `NODE_ENV === "development"`.
+
 ## Phase 3 — Session playback notes
 
 ### Desktop smoke test
@@ -160,6 +180,8 @@ src/
   app/api/inngest/        Inngest serve endpoint
   app/login/              Sign-in / sign-up
   app/scripts/            User's script list (RLS-scoped)
+  app/wizard/             7-step intake wizard (v0: 40 min locked)
+  app/voice/              Voice-clone consent + in-app recording
   app/session/[scriptId]/ Server-loaded manifest + client player
   app/dev/scripts/[id]/   Dev status page (poll)
   lib/supabase/           @supabase/ssr browser/server/middleware clients

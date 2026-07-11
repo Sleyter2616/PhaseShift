@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { AuthHeader } from "@/components/auth-header";
 import { getSessionUser } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
+import { DevGoldenScriptButton } from "./dev-golden-script-button";
 import { NewScriptButton } from "./new-script-button";
 
 function formatDate(iso: string): string {
@@ -36,7 +37,10 @@ export default async function ScriptsPage() {
       <main className="mx-auto max-w-3xl space-y-6 p-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <h1 className="text-2xl font-semibold">Your scripts</h1>
-          <NewScriptButton />
+          <div className="flex flex-col gap-2 sm:items-end">
+            <NewScriptButton />
+            {process.env.NODE_ENV === "development" ? <DevGoldenScriptButton /> : null}
+          </div>
         </div>
 
         {scripts && scripts.length > 0 ? (
@@ -76,7 +80,11 @@ export default async function ScriptsPage() {
           </ul>
         ) : (
           <p className="text-sm text-neutral-600">
-            No scripts yet. Use the button above to start a 40-minute test generation.
+            No scripts yet.{" "}
+            <Link href="/wizard" className="underline">
+              Start the intake wizard
+            </Link>{" "}
+            to generate your first 40-minute script.
           </p>
         )}
       </main>

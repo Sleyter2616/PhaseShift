@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { NextResponse } from "next/server";
 import { isInsufficientCreditsError } from "@/lib/auth/session";
-import { intakeSchema } from "@/lib/contracts/intake";
+import { createScriptBodySchema } from "@/lib/contracts/intake";
 import { PROMPT_VERSION } from "@/lib/compiler/prompt.v1.3";
 import { GENERATION_COST_CREDITS } from "@/lib/costs";
 import { getServiceClient } from "@/lib/db/service-client";
@@ -26,7 +26,8 @@ export async function POST(request: Request) {
 
     const userId = user.id;
     const body: unknown = await request.json();
-    const intake = intakeSchema.parse(body);
+    const parsed = createScriptBodySchema.parse(body);
+    const { voice_profile_id: requestedVoiceProfileId, ...intake } = parsed;
 
     const provider = defaultTtsProvider();
     const ttsModelId = defaultTtsModelId();
@@ -35,7 +36,26 @@ export async function POST(request: Request) {
         ? (process.env.ELEVENLABS_STOCK_VOICE_ID ?? "mock-voice")
         : process.env.ELEVENLABS_STOCK_VOICE_ID;
 
-    if (!stockVoiceId) {
+    let voiceProfileId: string | null = null;
+    let scriptStockVoiceId: string | null = stockVoiceId ?? null;
+
+    if (requestedVoiceProfileId) {
+      const { data: voiceProfile, error: voiceProfileError } = await supabase
+        .from("voice_profiles")
+        .select("id, status, provider_voice_id")
+        .eq("id", requestedVoiceProfileId)
+        .eq("status", "ready")
+        .maybeSingle();
+
+      if (voiceProfileError) {
+        return NextResponse.json({ error: voiceProfileError.message }, { status: 500 });
+      }
+      if (!voiceProfile?.id || !voiceProfile.provider_voice_id) {
+        return NextResponse.json({ error: "invalid voice_profile_id" }, { status: 400 });
+      }
+      voiceProfileId = voiceProfile.id;
+      scriptStockVoiceId = null;
+    } else if (!scriptStockVoiceId) {
       return NextResponse.json(
         { error: "ELEVENLABS_STOCK_VOICE_ID is required when TTS_PROVIDER=elevenlabs" },
         { status: 500 },
@@ -112,7 +132,8 @@ export async function POST(request: Request) {
         goal_version_id: goalVersion.id,
         status: "generating",
         provider,
-        stock_voice_id: stockVoiceId,
+        stock_voice_id: scriptStockVoiceId,
+        voice_profile_id: voiceProfileId,
         tts_model_id: ttsModelId,
         prompt_version: PROMPT_VERSION,
         llm_model: llmModel,

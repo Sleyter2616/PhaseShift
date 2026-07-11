@@ -25,11 +25,12 @@ describe("resolveSynthesisIdentity", () => {
       user_id: "user-1",
       stock_voice_id: null,
       voice_profile_id: "profile-uuid",
+      provider_voice_id: "eleven-voice-abc",
       tts_model_id: "eleven_flash_v2_5",
     });
 
     expect(identity.assetScope).toBe("user");
-    expect(identity.voiceId).toBe("profile-uuid");
+    expect(identity.voiceId).toBe("eleven-voice-abc");
     expect(buildStoragePath(identity, "audio-1")).toBe("user-1/audio-1.mp3");
   });
 });

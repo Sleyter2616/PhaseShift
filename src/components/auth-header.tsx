@@ -13,6 +13,12 @@ export async function AuthHeader() {
           <Link href="/scripts" className="font-medium">
             PhaseShift
           </Link>
+          <Link href="/wizard" className="text-neutral-600 hover:text-neutral-900">
+            Wizard
+          </Link>
+          <Link href="/voice" className="text-neutral-600 hover:text-neutral-900">
+            Voice
+          </Link>
           <span className="text-neutral-500">{user.email}</span>
         </nav>
         <form action={signOut}>

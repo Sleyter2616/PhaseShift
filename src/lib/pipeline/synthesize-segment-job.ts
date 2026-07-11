@@ -45,7 +45,9 @@ export async function runSynthesizeSegment(
 
   const { data: script, error: scriptError } = await supabase
     .from("scripts")
-    .select("provider, stock_voice_id, voice_profile_id, tts_model_id, user_id")
+    .select(
+      "provider, stock_voice_id, voice_profile_id, tts_model_id, user_id, voice_profiles(provider_voice_id)",
+    )
     .eq("id", script_id)
     .single();
 
@@ -53,7 +55,19 @@ export async function runSynthesizeSegment(
     throw new Error(`script load failed: ${scriptError?.message ?? script_id}`);
   }
 
-  const identity = resolveSynthesisIdentity(script as ScriptVoiceSource);
+  const rawProfile = script.voice_profiles as
+    | { provider_voice_id: string | null }
+    | { provider_voice_id: string | null }[]
+    | null;
+  const voiceProfile = Array.isArray(rawProfile) ? rawProfile[0] : rawProfile;
+  const identity = resolveSynthesisIdentity({
+    provider: script.provider,
+    user_id: script.user_id,
+    stock_voice_id: script.stock_voice_id,
+    voice_profile_id: script.voice_profile_id,
+    provider_voice_id: voiceProfile?.provider_voice_id ?? null,
+    tts_model_id: script.tts_model_id,
+  } as ScriptVoiceSource);
   const audioFileId = randomUUID();
   const storagePath = buildStoragePath(identity, audioFileId);
 
