@@ -1,4 +1,7 @@
-import { getServiceClient } from "@/lib/db/service-client";
+import { notFound, redirect } from "next/navigation";
+import { AuthHeader } from "@/components/auth-header";
+import { getSessionUser } from "@/lib/auth/session";
+import { createClient } from "@/lib/supabase/server";
 
 export const revalidate = 2;
 
@@ -7,14 +10,21 @@ interface PageProps {
 }
 
 export default async function DevScriptStatusPage({ params }: PageProps) {
+  const user = await getSessionUser();
+  if (!user) redirect("/login");
+
   const { id } = await params;
-  const supabase = getServiceClient();
+  const supabase = await createClient();
 
   const { data: script } = await supabase
     .from("scripts")
     .select("id, status, error_message, total_duration_sec, created_at")
     .eq("id", id)
     .maybeSingle();
+
+  if (!script) {
+    notFound();
+  }
 
   const { data: segments } = await supabase
     .from("script_segments")
@@ -32,12 +42,11 @@ export default async function DevScriptStatusPage({ params }: PageProps) {
   });
 
   return (
-    <main className="mx-auto max-w-3xl p-6 font-mono text-sm">
-      <meta httpEquiv="refresh" content="2" />
-      <h1 className="mb-4 text-lg font-semibold">Script {id}</h1>
-      {!script ? (
-        <p>Not found</p>
-      ) : (
+    <>
+      <AuthHeader />
+      <main className="mx-auto max-w-3xl p-6 font-mono text-sm">
+        <meta httpEquiv="refresh" content="2" />
+        <h1 className="mb-4 text-lg font-semibold">Script {id}</h1>
         <div className="space-y-3">
           <p>
             <strong>status:</strong> {script.status}
@@ -74,7 +83,7 @@ export default async function DevScriptStatusPage({ params }: PageProps) {
           </table>
           <p className="text-neutral-500">Auto-refresh every 2s</p>
         </div>
-      )}
-    </main>
+      </main>
+    </>
   );
 }

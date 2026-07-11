@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { AuthHeader } from "@/components/auth-header";
 import { getSessionUser } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
+import { NewScriptButton } from "./new-script-button";
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleString();
@@ -33,8 +34,9 @@ export default async function ScriptsPage() {
     <>
       <AuthHeader />
       <main className="mx-auto max-w-3xl space-y-6 p-6">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <h1 className="text-2xl font-semibold">Your scripts</h1>
+          <NewScriptButton />
         </div>
 
         {scripts && scripts.length > 0 ? (
@@ -74,8 +76,7 @@ export default async function ScriptsPage() {
           </ul>
         ) : (
           <p className="text-sm text-neutral-600">
-            No scripts yet. Request generation via{" "}
-            <code className="rounded bg-neutral-100 px-1">POST /api/scripts</code> while signed in.
+            No scripts yet. Use the button above to start a 40-minute test generation.
           </p>
         )}
       </main>
