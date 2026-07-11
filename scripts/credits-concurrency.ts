@@ -47,11 +47,10 @@ async function main() {
     const { error: signInError } = await client.auth.signInWithPassword({ email, password });
     if (signInError) throw new Error(signInError.message);
 
-    const scriptId = randomUUID();
     const results = await Promise.all(
       Array.from({ length: 10 }, () =>
         client.rpc("spend_credits", {
-          p_script: scriptId,
+          p_script: null,
           p_amount: 1,
           p_reason: "generation",
         }),
@@ -62,6 +61,17 @@ async function main() {
     const insufficient = results.filter((result) =>
       (result.error?.message ?? "").includes("insufficient_credits"),
     ).length;
+
+    const unexpected = new Map<string, number>();
+    for (const result of results) {
+      if (!result.error) continue;
+      const message = result.error.message;
+      if (message.includes("insufficient_credits")) continue;
+      unexpected.set(message, (unexpected.get(message) ?? 0) + 1);
+    }
+    for (const [message, count] of unexpected) {
+      console.log(`UNEXPECTED ${count}x: ${message}`);
+    }
 
     const { data: profile } = await admin
       .from("profiles")
