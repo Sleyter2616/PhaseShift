@@ -8,7 +8,7 @@ import {
   VOICE_SAMPLE_MIN_SEC,
   VOICE_SAMPLE_TARGET_SEC,
 } from "@/lib/voice/reading-passage";
-import { confirmVoiceConsent, submitVoiceSample } from "./actions";
+import { confirmVoiceConsent } from "./actions";
 
 interface VoiceOnboardingProps {
   status: "none" | "pending" | "ready" | "failed";
@@ -109,13 +109,26 @@ export function VoiceOnboarding({ status, consentConfirmed }: VoiceOnboardingPro
     setSubmitError(null);
     const formData = new FormData();
     formData.append("audio", audioBlob, "voice-sample.webm");
-    const result = await submitVoiceSample(formData);
-    setSubmitPending(false);
-    if (result.error) {
-      setSubmitError(result.error);
-      return;
+    formData.append("duration_sec", String(elapsedSec));
+
+    try {
+      const response = await fetch("/api/voice", {
+        method: "POST",
+        body: formData,
+      });
+      const body: { error?: string } = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        setSubmitError(body.error ?? response.statusText ?? "upload failed");
+        return;
+      }
+
+      router.refresh();
+    } catch (requestError) {
+      setSubmitError(requestError instanceof Error ? requestError.message : "upload failed");
+    } finally {
+      setSubmitPending(false);
     }
-    router.refresh();
   }
 
   if (status === "ready") {

@@ -17,7 +17,7 @@ See the full execution plan in [`docs/blueprint.md`](docs/blueprint.md).
 
 - Node.js ≥ 22 (`nvm use`)
 - pnpm 9+
-- Hosted Supabase dev project with migrations `0001`–`0007` applied
+- Hosted Supabase dev project with migrations `0001`–`0008` applied
 - [Anthropic API key](https://console.anthropic.com/)
 - [ElevenLabs API key](https://elevenlabs.io/) (Phase 2 live synthesis; optional when `TTS_PROVIDER=selfhost`)
 - [Inngest dev server](https://www.inngest.com/docs/local-development)
@@ -33,6 +33,7 @@ Copy `.env.example` to `.env.local` and fill in:
 | `SUPABASE_SERVICE_ROLE_KEY` | Server-only admin (signed URLs, refunds, jobs) |
 | `ANTHROPIC_API_KEY` | Claude compiler |
 | `ELEVENLABS_API_KEY` | ElevenLabs TTS (live synthesis) |
+| `ELEVENLABS_VOICES_API_KEY` | ElevenLabs instant voice clone (`POST /api/voice`); falls back to `ELEVENLABS_API_KEY` |
 | `ELEVENLABS_STOCK_VOICE_ID` | Default stock voice for `POST /api/scripts` |
 | `ELEVENLABS_MODEL_ID` | Default `eleven_flash_v2_5` |
 | `TTS_PROVIDER` | `elevenlabs` (default) or `selfhost` for zero ElevenLabs spend |
@@ -53,7 +54,7 @@ pnpm typecheck && pnpm lint && pnpm test
 
 ### 2. Apply migrations
 
-Apply `supabase/migrations/0001` through `0007` on your hosted Supabase project (including `0007_auth.sql` for the signup profile trigger and `refund_credits`).
+Apply `supabase/migrations/0001` through `0008` on your hosted Supabase project (including `0007_auth.sql` for the signup profile trigger and `refund_credits`, and `0008_voice_samples_bucket.sql` for voice clone uploads).
 
 ### 3. Seed dev user
 
@@ -132,7 +133,7 @@ Seven-step client flow (auth required). Per-step validation uses partial Zod sch
 
 ### Voice clone (`/voice`)
 
-Consent screen (own-voice-only, in-app recording, no uploads) → server action sets `voice_profiles.consent_confirmed_at` and `status: pending` → ~90s guided reading with `MediaRecorder` → ElevenLabs instant clone (or mock voice id when `TTS_PROVIDER=selfhost`).
+Consent screen (own-voice-only, in-app recording, no uploads) → server action sets `voice_profiles.consent_confirmed_at` and `status: pending` → ~90s guided reading with `MediaRecorder` → `POST /api/voice` (FormData, bypasses Server Action body cap) stores sample to `voice-samples/{user_id}/`, runs ElevenLabs IVC (or mock when `TTS_PROVIDER=selfhost`).
 
 When `status: ready`, the wizard step 7 voice selector shows **My voice**.
 
@@ -177,6 +178,7 @@ Open `https://<your-lan-ip>:3000/session/<script_id>` and keep the screen in the
 ```
 src/
   app/api/scripts/        POST intake (auth + spend_credits), GET manifest
+  app/api/voice/          POST voice sample upload + clone (auth, FormData)
   app/api/inngest/        Inngest serve endpoint
   app/login/              Sign-in / sign-up
   app/scripts/            User's script list (RLS-scoped)
@@ -194,7 +196,7 @@ src/
   lib/pipeline/           segment derivation, dedupe, reconcile
   lib/tts/                ElevenLabs + selfhost providers
 scripts/                  seed, rls-e2e, credits-concurrency, verify
-supabase/migrations/      0001–0007
+supabase/migrations/      0001–0008
 ```
 
 ## Roadmap
