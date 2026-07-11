@@ -1,10 +1,21 @@
 import { NextResponse } from "next/server";
+import {
+  processVoiceSample,
+  retryVoiceCloneFromStoredSample,
+  VOICE_CLONING_NOT_CONFIGURED,
+} from "@/lib/voice/process-voice-sample";
 import { createClient } from "@/lib/supabase/server";
-import { processVoiceSample } from "@/lib/voice/process-voice-sample";
 import {
   parseDurationSecField,
   validateVoiceSampleUpload,
 } from "@/lib/voice/sample-limits";
+
+function voiceErrorStatus(error: string, notConfigured?: boolean): number {
+  if (notConfigured || error === VOICE_CLONING_NOT_CONFIGURED) return 422;
+  if (error === "consent required before recording") return 403;
+  if (error === "no stored voice sample") return 404;
+  return 502;
+}
 
 export async function POST(request: Request) {
   try {
@@ -44,11 +55,45 @@ export async function POST(request: Request) {
 
     const result = await processVoiceSample(supabase, user.id, audio);
     if (result.error) {
-      const status = result.error === "consent required before recording" ? 403 : 502;
-      return NextResponse.json({ error: result.error }, { status });
+      return NextResponse.json(
+        { error: result.error },
+        { status: voiceErrorStatus(result.error, result.notConfigured) },
+      );
     }
 
-    return NextResponse.json({ status: "ready" }, { status: 200 });
+    return NextResponse.json(
+      { status: "ready", provider_voice_id: result.provider_voice_id },
+      { status: 200 },
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown error";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+export async function PATCH() {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
+
+    const result = await retryVoiceCloneFromStoredSample(supabase, user.id);
+    if (result.error) {
+      return NextResponse.json(
+        { error: result.error },
+        { status: voiceErrorStatus(result.error, result.notConfigured) },
+      );
+    }
+
+    return NextResponse.json(
+      { status: "ready", provider_voice_id: result.provider_voice_id },
+      { status: 200 },
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown error";
     return NextResponse.json({ error: message }, { status: 500 });

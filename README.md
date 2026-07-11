@@ -33,7 +33,7 @@ Copy `.env.example` to `.env.local` and fill in:
 | `SUPABASE_SERVICE_ROLE_KEY` | Server-only admin (signed URLs, refunds, jobs) |
 | `ANTHROPIC_API_KEY` | Claude compiler |
 | `ELEVENLABS_API_KEY` | ElevenLabs TTS (live synthesis) |
-| `ELEVENLABS_VOICES_API_KEY` | ElevenLabs instant voice clone (`POST /api/voice`); falls back to `ELEVENLABS_API_KEY` |
+| `ELEVENLABS_VOICES_API_KEY` | ElevenLabs instant voice clone (`POST /api/voice`); required for real cloning |
 | `ELEVENLABS_STOCK_VOICE_ID` | Default stock voice for `POST /api/scripts` |
 | `ELEVENLABS_MODEL_ID` | Default `eleven_flash_v2_5` |
 | `TTS_PROVIDER` | `elevenlabs` (default) or `selfhost` for zero ElevenLabs spend |
@@ -133,7 +133,7 @@ Seven-step client flow (auth required). Per-step validation uses partial Zod sch
 
 ### Voice clone (`/voice`)
 
-Consent screen (own-voice-only, in-app recording, no uploads) → server action sets `voice_profiles.consent_confirmed_at` and `status: pending` → ~90s guided reading with `MediaRecorder` → `POST /api/voice` (FormData, bypasses Server Action body cap) stores sample to `voice-samples/{user_id}/`, runs ElevenLabs IVC (or mock when `TTS_PROVIDER=selfhost`).
+Consent screen (own-voice-only, in-app recording, no uploads) → server action sets `voice_profiles.consent_confirmed_at` and `status: pending` → ~90s guided reading with `MediaRecorder` → `POST /api/voice` stores sample to `voice-samples/{user_id}/`, runs ElevenLabs IVC (`ELEVENLABS_VOICES_API_KEY` required; returns 422 if unset). `PATCH /api/voice` retries clone from the stored sample.
 
 When `status: ready`, the wizard step 7 voice selector shows **My voice**.
 

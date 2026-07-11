@@ -29,7 +29,3 @@ export async function cloneVoiceWithElevenLabs(
   }
   return body.voice_id;
 }
-
-export function mockClonedVoiceId(userId: string): string {
-  return `mock-clone-${userId.slice(0, 8)}`;
-}

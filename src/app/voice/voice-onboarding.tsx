@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -13,9 +12,16 @@ import { confirmVoiceConsent } from "./actions";
 interface VoiceOnboardingProps {
   status: "none" | "pending" | "ready" | "failed";
   consentConfirmed: boolean;
+  providerVoiceId: string | null;
+  canRetryStoredSample: boolean;
 }
 
-export function VoiceOnboarding({ status, consentConfirmed }: VoiceOnboardingProps) {
+export function VoiceOnboarding({
+  status,
+  consentConfirmed,
+  providerVoiceId,
+  canRetryStoredSample,
+}: VoiceOnboardingProps) {
   const router = useRouter();
   const [consentChecked, setConsentChecked] = useState(false);
   const [consentPending, setConsentPending] = useState(false);
@@ -27,10 +33,16 @@ export function VoiceOnboarding({ status, consentConfirmed }: VoiceOnboardingPro
   const [recordError, setRecordError] = useState<string | null>(null);
   const [submitPending, setSubmitPending] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [readyVoiceId, setReadyVoiceId] = useState<string | null>(providerVoiceId);
+  const [showRecorder, setShowRecorder] = useState(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    setReadyVoiceId(providerVoiceId);
+  }, [providerVoiceId]);
 
   useEffect(() => {
     return () => {
@@ -116,13 +128,19 @@ export function VoiceOnboarding({ status, consentConfirmed }: VoiceOnboardingPro
         method: "POST",
         body: formData,
       });
-      const body: { error?: string } = await response.json().catch(() => ({}));
+      const body: { error?: string; provider_voice_id?: string } = await response
+        .json()
+        .catch(() => ({}));
 
       if (!response.ok) {
         setSubmitError(body.error ?? response.statusText ?? "upload failed");
         return;
       }
 
+      if (body.provider_voice_id) {
+        setReadyVoiceId(body.provider_voice_id);
+        setShowRecorder(false);
+      }
       router.refresh();
     } catch (requestError) {
       setSubmitError(requestError instanceof Error ? requestError.message : "upload failed");
@@ -131,13 +149,53 @@ export function VoiceOnboarding({ status, consentConfirmed }: VoiceOnboardingPro
     }
   }
 
-  if (status === "ready") {
+  async function handleRetryStored() {
+    setSubmitPending(true);
+    setSubmitError(null);
+
+    try {
+      const response = await fetch("/api/voice", { method: "PATCH" });
+      const body: { error?: string; provider_voice_id?: string } = await response
+        .json()
+        .catch(() => ({}));
+
+      if (!response.ok) {
+        setSubmitError(body.error ?? response.statusText ?? "retry failed");
+        return;
+      }
+
+      if (body.provider_voice_id) {
+        setReadyVoiceId(body.provider_voice_id);
+        setShowRecorder(false);
+      }
+      router.refresh();
+    } catch (requestError) {
+      setSubmitError(requestError instanceof Error ? requestError.message : "retry failed");
+    } finally {
+      setSubmitPending(false);
+    }
+  }
+
+  if (readyVoiceId && !showRecorder) {
     return (
       <div className="space-y-4">
         <p className="text-sm text-green-800">Your voice clone is ready.</p>
-        <Link href="/wizard" className="text-sm font-medium underline">
-          Continue to intake wizard
-        </Link>
+        <p className="text-sm text-neutral-700">
+          ElevenLabs voice ID:{" "}
+          <code className="rounded bg-neutral-100 px-1 font-mono text-xs">{readyVoiceId}</code>
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            setShowRecorder(true);
+            setSubmitError(null);
+            setAudioBlob(null);
+            setElapsedSec(0);
+          }}
+          className="rounded border border-neutral-300 px-4 py-2 text-sm"
+        >
+          Record a new sample
+        </button>
       </div>
     );
   }
@@ -181,8 +239,20 @@ export function VoiceOnboarding({ status, consentConfirmed }: VoiceOnboardingPro
     <div className="space-y-5">
       {status === "failed" ? (
         <p className="text-sm text-red-700">
-          Your last clone attempt failed. Record a new sample below.
+          Your last clone attempt failed. Record a new sample below or retry from your stored
+          recording.
         </p>
+      ) : null}
+
+      {canRetryStoredSample ? (
+        <button
+          type="button"
+          disabled={submitPending}
+          onClick={() => void handleRetryStored()}
+          className="rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+        >
+          {submitPending ? "Retrying…" : "Retry from stored sample"}
+        </button>
       ) : null}
 
       <div className="rounded border border-neutral-200 bg-neutral-50 p-4 text-sm leading-relaxed">

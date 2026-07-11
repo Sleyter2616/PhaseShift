@@ -12,6 +12,7 @@ import {
   defaultTtsProvider,
 } from "@/lib/pipeline/synthesis-identity";
 import { createClient } from "@/lib/supabase/server";
+import { isMockProviderVoiceId } from "@/lib/voice/process-voice-sample";
 
 export async function POST(request: Request) {
   try {
@@ -50,7 +51,11 @@ export async function POST(request: Request) {
       if (voiceProfileError) {
         return NextResponse.json({ error: voiceProfileError.message }, { status: 500 });
       }
-      if (!voiceProfile?.id || !voiceProfile.provider_voice_id) {
+      if (
+        !voiceProfile?.id ||
+        !voiceProfile.provider_voice_id ||
+        isMockProviderVoiceId(voiceProfile.provider_voice_id)
+      ) {
         return NextResponse.json({ error: "invalid voice_profile_id" }, { status: 400 });
       }
       voiceProfileId = voiceProfile.id;
