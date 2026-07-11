@@ -54,7 +54,7 @@ pnpm typecheck && pnpm lint && pnpm test
 
 ### 2. Apply migrations
 
-Apply `supabase/migrations/0001` through `0008` on your hosted Supabase project (including `0007_auth.sql` for the signup profile trigger and `refund_credits`, and `0008_voice_samples_bucket.sql` for voice clone uploads).
+Apply `supabase/migrations/0001` through `0008` on your hosted Supabase project (including `0007_auth.sql` for the signup profile trigger and `refund_credits`, and `0008_voice_bucket.sql` for the `voice-samples` storage bucket).
 
 ### 3. Seed dev user
 
