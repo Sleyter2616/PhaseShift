@@ -29,6 +29,7 @@ export interface PlaybackManifest {
     entrainment_mode: "binaural" | "isochronic";
     entrainment_plan: EntrainmentPlanItem[];
     error_message: string | null;
+    provider: string;
   };
   segments: PlaybackManifestSegment[];
 }
@@ -39,7 +40,9 @@ export async function loadPlaybackManifest(
 ): Promise<PlaybackManifest | null> {
   const { data: script, error: scriptError } = await supabase
     .from("scripts")
-    .select("id, status, goal_version_id, total_duration_sec, entrainment_mode, error_message, compiler_input")
+    .select(
+      "id, status, goal_version_id, total_duration_sec, entrainment_mode, error_message, compiler_input, provider",
+    )
     .eq("id", scriptId)
     .single();
 
@@ -106,6 +109,7 @@ export async function loadPlaybackManifest(
       entrainment_mode: script.entrainment_mode as "binaural" | "isochronic",
       entrainment_plan: entrainmentPlan,
       error_message: script.error_message,
+      provider: script.provider,
     },
     segments: manifestSegments,
   };

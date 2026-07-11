@@ -5,6 +5,7 @@ import { getSessionUser } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { DevGoldenScriptButton } from "./dev-golden-script-button";
 import { NewScriptButton } from "./new-script-button";
+import { synthesisProvenanceBadge } from "@/lib/synthesis/provenance";
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleString();
@@ -17,7 +18,9 @@ export default async function ScriptsPage() {
   const supabase = await createClient();
   const { data: scripts, error } = await supabase
     .from("scripts")
-    .select("id, status, total_duration_sec, created_at")
+    .select(
+      "id, status, total_duration_sec, created_at, provider, stock_voice_id, voice_profile_id",
+    )
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -48,7 +51,12 @@ export default async function ScriptsPage() {
             {scripts.map((script) => (
               <li key={script.id} className="flex items-center justify-between gap-4 px-4 py-3">
                 <div className="min-w-0">
-                  <p className="truncate font-mono text-sm">{script.id}</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="truncate font-mono text-sm">{script.id}</p>
+                    <span className="shrink-0 rounded-full border border-neutral-300 bg-neutral-50 px-2 py-0.5 text-xs text-neutral-700">
+                      {synthesisProvenanceBadge(script)}
+                    </span>
+                  </div>
                   <p className="text-xs text-neutral-500">
                     {script.status}
                     {script.total_duration_sec != null

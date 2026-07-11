@@ -23,6 +23,7 @@ export const PLAYBACK_FIXTURE: PlaybackManifest = {
       { phase: "gamma", hz: 40, glide_sec: 2 },
     ],
     error_message: null,
+    provider: "elevenlabs",
   },
   segments: [
     {
