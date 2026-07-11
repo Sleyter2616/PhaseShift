@@ -15,6 +15,7 @@ import {
   upcomingSegmentSeqs,
   voicesDueInWindow,
 } from "@/lib/audio/scheduler";
+import { isTestGenerationProvider } from "@/lib/synthesis/provenance";
 import { completeSession, createSession } from "./actions";
 
 type PlayerStage =
@@ -136,6 +137,7 @@ function AudioDebugStrip({
 }
 
 export function SessionPlayer({ manifest }: SessionPlayerProps) {
+  const isTestGeneration = isTestGenerationProvider(manifest.meta.provider);
   const schedule = useMemo(() => computeSegmentSchedule(manifest.segments), [manifest.segments]);
   const glideBoundaries = useMemo(
     () => deriveGlideBoundaries(schedule, manifest.meta.entrainment_plan),
@@ -279,6 +281,8 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
   }, [stage, updateDebugSnapshot]);
 
   const ensureDecoded = useCallback(async (seq: number) => {
+    if (isTestGeneration) return;
+
     const decodeWindow = decodeWindowRef.current;
     if (decodeWindow.has(seq) || decodingRef.current.has(seq)) return;
 
@@ -295,7 +299,7 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
     } finally {
       decodingRef.current.delete(seq);
     }
-  }, []);
+  }, [isTestGeneration]);
 
   const runSchedulerTick = useCallback(() => {
     const engine = engineRef.current;
@@ -322,23 +326,27 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
 
     const currentSeq = segmentSeqForCtxTime(schedule, sessionStart, ctxNow);
     const upcoming = upcomingSegmentSeqs(schedule, sessionStart, ctxNow, 2);
-    const decodeTargets = decodeWindowRef.current.decodeTargets(currentSeq, upcoming);
-    for (const seq of decodeTargets) {
-      void ensureDecoded(seq);
+    if (!isTestGeneration) {
+      const decodeTargets = decodeWindowRef.current.decodeTargets(currentSeq, upcoming);
+      for (const seq of decodeTargets) {
+        void ensureDecoded(seq);
+      }
     }
 
-    const voices = voicesDueInWindow(schedule, sessionStart, ctxNow, scheduledVoicesRef.current);
-    for (const voice of voices) {
-      const buffer = decodeWindowRef.current.get<AudioBuffer>(voice.seq);
-      if (!buffer) {
-        void ensureDecoded(voice.seq);
-        continue;
+    if (!isTestGeneration) {
+      const voices = voicesDueInWindow(schedule, sessionStart, ctxNow, scheduledVoicesRef.current);
+      for (const voice of voices) {
+        const buffer = decodeWindowRef.current.get<AudioBuffer>(voice.seq);
+        if (!buffer) {
+          void ensureDecoded(voice.seq);
+          continue;
+        }
+        const source = engine.scheduleVoice(buffer, voice.atCtxTime);
+        scheduledVoicesRef.current.add(voice.seq);
+        source.onended = () => {
+          decodeWindowRef.current.markPlayed(voice.seq);
+        };
       }
-      const source = engine.scheduleVoice(buffer, voice.atCtxTime);
-      scheduledVoicesRef.current.add(voice.seq);
-      source.onended = () => {
-        decodeWindowRef.current.markPlayed(voice.seq);
-      };
     }
 
     const glides = glidesDueInWindow(
@@ -353,28 +361,32 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
       const atCtxTime = sessionStart + glide.atSec;
       engine.glideBeat(glide.toHz, glide.durationSec, atCtxTime);
     }
-  }, [ensureDecoded, glideBoundaries, releaseWakeLock, schedule, totalSec, updateDebugSnapshot]);
+  }, [ensureDecoded, glideBoundaries, isTestGeneration, releaseWakeLock, schedule, totalSec, updateDebugSnapshot]);
 
   const startPlayback = useCallback(async () => {
     setError(null);
     setStage("loading");
 
     try {
-      const [{ sessionId: createdSessionId }, compressed] = await Promise.all([
-        createSession(manifest.meta.script_id),
-        fetchCompressedBuffers(manifest, (loaded, total) => {
-          setFetchProgress({ loaded, total });
-        }),
-      ]);
+      const sessionPromise = createSession(manifest.meta.script_id);
+      const compressed = isTestGeneration
+        ? new Map<number, ArrayBuffer>()
+        : await fetchCompressedBuffers(manifest, (loaded, total) => {
+            setFetchProgress({ loaded, total });
+          });
+      const { sessionId: createdSessionId } = await sessionPromise;
       setSessionId(createdSessionId);
       compressedRef.current = compressed;
+      if (isTestGeneration) {
+        setFetchProgress({ loaded: 0, total: 0 });
+      }
       setStage("readyToPlay");
     } catch (beginError) {
       const message = beginError instanceof Error ? beginError.message : "failed to begin session";
       setError(message);
       setStage("prebegin");
     }
-  }, [manifest]);
+  }, [isTestGeneration, manifest]);
 
   const startAudio = useCallback(async () => {
     setError(null);
@@ -554,6 +566,11 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
             session screen to stay visible.
           </li>
         </ul>
+        {isTestGeneration ? (
+          <p className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            This is a test generation — it contains no synthesized speech.
+          </p>
+        ) : null}
         {error ? <p className="text-sm text-red-700">{error}</p> : null}
         <button
           type="button"

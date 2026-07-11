@@ -14,6 +14,8 @@
     "test": "vitest run",
     "format": "prettier --write .",
     "seed:dev": "tsx scripts/seed-dev-user.ts",
+    "rls:e2e": "tsx scripts/rls-e2e.ts",
+    "credits:concurrency": "tsx scripts/credits-concurrency.ts",
     "verify:phase1": "tsx scripts/verify-phase1.ts",
     "resynth:check": "tsx scripts/resynth-check.ts",
     "re:reconcile": "tsx scripts/re-reconcile.ts",
@@ -22,6 +24,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
+    "@supabase/ssr": "^0.12.0",
     "@supabase/supabase-js": "^2.110.1",
     "inngest": "^4.11.0",
     "next": "^15.3.3",

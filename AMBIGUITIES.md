@@ -125,3 +125,11 @@ Recorded ambiguities from `docs/blueprint.md` where the Phase 0 prompt or bluepr
 **Ambiguity:** Underwritten gamma text combined with pause stretching can produce ~2-minute gaps in the high-energy exit phase (quality smell, not a hard failure).
 
 **Proposed resolution:** Defer to Phase 3 first-listen review. Candidates if unacceptable: per-phase `scheduled_pause_after_ms` caps, or the v0.5 server-owned segment skeleton with pre-allocated pause slots.
+
+---
+
+## §2.4 — `aos_layer` collected but not consumed by compiler (Phase 4b.1)
+
+**Ambiguity:** Wizard step 7 collects optional `aos_layer` (ego/self/persona/shadow) and persists it on `goals.aos_layer`, but compiler prompt ≤v1.3 does not reference it in INPUT or step instructions.
+
+**Proposed resolution:** `aos_layer` is collected but unconsumed by compiler ≤v1.3; semantics scheduled with the v0.5 prompt.

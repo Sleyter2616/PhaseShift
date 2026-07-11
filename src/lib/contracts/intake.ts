@@ -210,6 +210,55 @@ export const intakeSchema = z.object({
 
 export type Intake = z.infer<typeof intakeSchema>;
 
+export const PRESENT_TENSE_GOAL_PATTERN = /^\s*i\s+(want|will)\b/i;
+
+/** §2.4 — strip leading "I want/will", capitalize remainder */
+export function rewriteGoalPresentTense(input: string): string {
+  const match = input.match(/^\s*i\s+(?:want|will)\s+([\s\S]*)$/i);
+  if (!match) return input;
+  const rest = match[1]?.trim() ?? "";
+  if (!rest) return input;
+  return rest.charAt(0).toUpperCase() + rest.slice(1);
+}
+
+export const SENSE_OPTIONS = ["sight", "sound", "touch", "smell", "taste"] as const;
+
+export const TIMEFRAME_PRESET_OPTIONS = TIMEFRAME_PRESETS;
+
+export function maxTimeframeIsoDate(): string {
+  return maxTimeframeDate().toISOString().slice(0, 10);
+}
+
+export function todayIsoDate(): string {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return today.toISOString().slice(0, 10);
+}
+
+export const wizardStep1Schema = intakeSchema.pick({ goal_statement: true });
+export const wizardStep2Schema = intakeSchema.pick({ localization: true });
+export const wizardStep3Schema = intakeSchema.pick({ triangulation: true });
+export const wizardStep4Schema = intakeSchema.pick({ not_list: true, wrong_pulls: true });
+export const wizardStep5Schema = intakeSchema.pick({ features: true });
+export const wizardStep6Schema = intakeSchema.pick({ sync_actions: true });
+export const wizardStep7Schema = intakeSchema.pick({ session: true });
+
+export const WIZARD_STEP_SCHEMAS = [
+  wizardStep1Schema,
+  wizardStep2Schema,
+  wizardStep3Schema,
+  wizardStep4Schema,
+  wizardStep5Schema,
+  wizardStep6Schema,
+  wizardStep7Schema,
+] as const;
+
+export const createScriptBodySchema = intakeSchema.extend({
+  voice_profile_id: z.string().uuid().optional(),
+});
+
+export type CreateScriptBody = z.infer<typeof createScriptBodySchema>;
+
 export function parseIntake(input: unknown): Intake {
   return intakeSchema.parse(input);
 }

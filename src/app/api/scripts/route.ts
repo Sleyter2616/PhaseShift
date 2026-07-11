@@ -1,8 +1,9 @@
 import { z } from "zod";
 import { NextResponse } from "next/server";
-import { assertDevAuth, DevAuthError, devAuthErrorResponse } from "@/lib/auth/dev-secret";
-import { intakeSchema } from "@/lib/contracts/intake";
+import { isInsufficientCreditsError } from "@/lib/auth/session";
+import { createScriptBodySchema } from "@/lib/contracts/intake";
 import { PROMPT_VERSION } from "@/lib/compiler/prompt.v1.3";
+import { GENERATION_COST_CREDITS } from "@/lib/costs";
 import { getServiceClient } from "@/lib/db/service-client";
 import { inngest } from "@/inngest/client";
 import { buildCompilerInput } from "@/lib/session/derive";
@@ -10,13 +11,24 @@ import {
   defaultTtsModelId,
   defaultTtsProvider,
 } from "@/lib/pipeline/synthesis-identity";
+import { createClient } from "@/lib/supabase/server";
+import { isMockProviderVoiceId } from "@/lib/voice/process-voice-sample";
 
 export async function POST(request: Request) {
   try {
-    const userId = assertDevAuth(request);
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
+
+    const userId = user.id;
     const body: unknown = await request.json();
-    const intake = intakeSchema.parse(body);
-    const supabase = getServiceClient();
+    const parsed = createScriptBodySchema.parse(body);
+    const { voice_profile_id: requestedVoiceProfileId, ...intake } = parsed;
 
     const provider = defaultTtsProvider();
     const ttsModelId = defaultTtsModelId();
@@ -25,7 +37,30 @@ export async function POST(request: Request) {
         ? (process.env.ELEVENLABS_STOCK_VOICE_ID ?? "mock-voice")
         : process.env.ELEVENLABS_STOCK_VOICE_ID;
 
-    if (!stockVoiceId) {
+    let voiceProfileId: string | null = null;
+    let scriptStockVoiceId: string | null = stockVoiceId ?? null;
+
+    if (requestedVoiceProfileId) {
+      const { data: voiceProfile, error: voiceProfileError } = await supabase
+        .from("voice_profiles")
+        .select("id, status, provider_voice_id")
+        .eq("id", requestedVoiceProfileId)
+        .eq("status", "ready")
+        .maybeSingle();
+
+      if (voiceProfileError) {
+        return NextResponse.json({ error: voiceProfileError.message }, { status: 500 });
+      }
+      if (
+        !voiceProfile?.id ||
+        !voiceProfile.provider_voice_id ||
+        isMockProviderVoiceId(voiceProfile.provider_voice_id)
+      ) {
+        return NextResponse.json({ error: "invalid voice_profile_id" }, { status: 400 });
+      }
+      voiceProfileId = voiceProfile.id;
+      scriptStockVoiceId = null;
+    } else if (!scriptStockVoiceId) {
       return NextResponse.json(
         { error: "ELEVENLABS_STOCK_VOICE_ID is required when TTS_PROVIDER=elevenlabs" },
         { status: 500 },
@@ -102,7 +137,8 @@ export async function POST(request: Request) {
         goal_version_id: goalVersion.id,
         status: "generating",
         provider,
-        stock_voice_id: stockVoiceId,
+        stock_voice_id: scriptStockVoiceId,
+        voice_profile_id: voiceProfileId,
         tts_model_id: ttsModelId,
         prompt_version: PROMPT_VERSION,
         llm_model: llmModel,
@@ -116,6 +152,23 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: scriptError?.message ?? "script insert failed" }, { status: 500 });
     }
 
+    const { error: spendError } = await supabase.rpc("spend_credits", {
+      p_script: script.id,
+      p_amount: GENERATION_COST_CREDITS,
+      p_reason: "generation",
+    });
+
+    if (spendError) {
+      if (isInsufficientCreditsError(spendError)) {
+        await supabase
+          .from("scripts")
+          .update({ status: "failed", error_message: "insufficient_credits" })
+          .eq("id", script.id);
+        return NextResponse.json({ error: "insufficient_credits" }, { status: 402 });
+      }
+      return NextResponse.json({ error: spendError.message }, { status: 500 });
+    }
+
     try {
       await inngest.send({
         name: "script/generate.requested",
@@ -124,6 +177,12 @@ export async function POST(request: Request) {
     } catch (enqueueError) {
       const message =
         enqueueError instanceof Error ? enqueueError.message : "unknown enqueue error";
+      const service = getServiceClient();
+      await service.rpc("refund_credits", {
+        p_user: userId,
+        p_script: script.id,
+        p_amount: GENERATION_COST_CREDITS,
+      });
       await supabase
         .from("scripts")
         .update({ status: "failed", error_message: `enqueue_failed: ${message}`.slice(0, 4000) })
@@ -134,9 +193,6 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ script_id: script.id }, { status: 202 });
   } catch (error) {
-    if (error instanceof DevAuthError) {
-      return devAuthErrorResponse();
-    }
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: error.flatten() }, { status: 400 });
     }

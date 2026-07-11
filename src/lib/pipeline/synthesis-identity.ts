@@ -15,6 +15,7 @@ export interface ScriptVoiceSource {
   user_id: string;
   stock_voice_id: string | null;
   voice_profile_id: string | null;
+  provider_voice_id?: string | null;
   tts_model_id: string | null;
 }
 
@@ -40,10 +41,13 @@ export function resolveSynthesisIdentity(script: ScriptVoiceSource): SynthesisId
   const provider = script.provider;
 
   if (script.voice_profile_id) {
+    if (!script.provider_voice_id) {
+      throw new Error("voice profile missing provider_voice_id");
+    }
     return {
       provider,
       assetScope: "user",
-      voiceId: script.voice_profile_id,
+      voiceId: script.provider_voice_id,
       modelId,
       settings: DEFAULT_VOICE_SETTINGS,
       storageScopeKey: script.user_id,
