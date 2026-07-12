@@ -9,20 +9,13 @@ import {
 import { applyDedupeHits, planSegmentDedupe } from "@/lib/pipeline/dedupe-plan";
 import { deriveSegmentRows } from "@/lib/pipeline/segment-rows";
 import { reconcileSegments } from "@/lib/pipeline/reconcile-persist";
+import { markScriptFailed } from "@/lib/pipeline/mark-script-failed";
 import {
-  resolveSynthesisIdentity,
+  loadScriptSynthesisIdentity,
   type ScriptVoiceSource,
 } from "@/lib/pipeline/synthesis-identity";
 import type { CompilerInput } from "@/lib/session/derive";
 import { synthesizeSegment } from "./synthesize-segment";
-
-async function markScriptFailed(scriptId: string, message: string): Promise<void> {
-  const supabase = getServiceClient();
-  await supabase
-    .from("scripts")
-    .update({ status: "failed", error_message: message.slice(0, 4000) })
-    .eq("id", scriptId);
-}
 
 export const generateScript = inngest.createFunction(
   {
@@ -56,7 +49,9 @@ export const generateScript = inngest.createFunction(
         };
       });
 
-      const synthesisIdentity = resolveSynthesisIdentity(scriptCtx);
+      const synthesisIdentity = await step.run("resolve-synthesis-identity", async () => {
+        return loadScriptSynthesisIdentity(getServiceClient(), scriptCtx);
+      });
 
       const manifest = await step.run("compile", async () => {
         try {

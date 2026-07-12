@@ -1,5 +1,6 @@
 import type { AssetScope } from "../tts/dedupe";
 import type { TtsProviderId } from "../tts/provider";
+import type { ServiceClient } from "../db/service-client";
 
 export interface SynthesisIdentity {
   provider: TtsProviderId;
@@ -73,4 +74,34 @@ export function buildStoragePath(identity: SynthesisIdentity, audioFileId: strin
     return `shared/${identity.storageScopeKey}/${audioFileId}.mp3`;
   }
   return `${identity.storageScopeKey}/${audioFileId}.mp3`;
+}
+
+export async function loadScriptSynthesisIdentity(
+  supabase: ServiceClient,
+  script: ScriptVoiceSource,
+): Promise<SynthesisIdentity> {
+  if (!script.voice_profile_id) {
+    return resolveSynthesisIdentity(script);
+  }
+
+  if (script.provider_voice_id) {
+    return resolveSynthesisIdentity(script);
+  }
+
+  const { data: profile, error } = await supabase
+    .from("voice_profiles")
+    .select("provider_voice_id")
+    .eq("id", script.voice_profile_id)
+    .single();
+
+  if (error || !profile?.provider_voice_id) {
+    throw new Error(
+      `voice profile missing provider_voice_id: ${error?.message ?? script.voice_profile_id}`,
+    );
+  }
+
+  return resolveSynthesisIdentity({
+    ...script,
+    provider_voice_id: profile.provider_voice_id,
+  });
 }

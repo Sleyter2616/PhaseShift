@@ -19,6 +19,7 @@
     "verify:phase1": "tsx scripts/verify-phase1.ts",
     "resynth:check": "tsx scripts/resynth-check.ts",
     "re:reconcile": "tsx scripts/re-reconcile.ts",
+    "retry:synthesis": "tsx scripts/retry-synthesis.ts",
     "compile:once": "tsx scripts/compile-once.ts",
     "tts:sample": "tsx scripts/tts-sample.ts"
   },

@@ -1,5 +1,6 @@
 import type { SynthesisRequest, SynthesisResult, TTSProvider } from "./provider";
 import { TTSProviderError } from "./errors";
+import { isUuidV4 } from "./voice-id-guard";
 
 const ELEVENLABS_API = "https://api.elevenlabs.io/v1";
 
@@ -31,6 +32,10 @@ export class ElevenLabsProvider implements TTSProvider {
   constructor(private readonly apiKey: string) {}
 
   async synthesize(req: SynthesisRequest): Promise<SynthesisResult> {
+    if (isUuidV4(req.voiceId)) {
+      throw new TTSProviderError("voiceId looks like an internal uuid — wiring bug", false);
+    }
+
     const url = `${ELEVENLABS_API}/text-to-speech/${encodeURIComponent(req.voiceId)}/with-timestamps`;
 
     let response: Response;

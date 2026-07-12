@@ -171,6 +171,7 @@ Open `https://<your-lan-ip>:3000/session/<script_id>` and keep the screen in the
 | `pnpm credits:concurrency` | `spend_credits` FOR UPDATE lock proof |
 | `pnpm verify:phase1 <id>` | Phase 1 acceptance checks |
 | `pnpm resynth:check <id>` | Dedupe idempotency check |
+| `pnpm retry:synthesis <id>` | Re-synthesize a failed script with corrected voice identity (no recompile) |
 | `pnpm tts:sample <voiceId> [modelId]` | S1 bake-off: ~75s excerpt MP3 |
 
 ## Repo map
