@@ -36,7 +36,7 @@ export function reconcilePhaseTiming(input: ReconcileInput): ReconcileResult {
     const budgetSec = input.phaseBudgetSec[phase];
     const voicedSec = segments.reduce((sum, s) => sum + s.actual_duration_sec, 0);
     const rawPauseMs = segments.reduce((sum, s) => sum + s.pause_after_ms, 0);
-    const remainingMs = Math.max(0, budgetSec * 1000 - voicedSec * 1000);
+    const remainingMs = Math.max(0, Math.round(budgetSec * 1000 - voicedSec * 1000));
 
     if (voicedSec > budgetSec * 1.02) {
       overBudgetPhases.push(phase);
@@ -52,13 +52,11 @@ export function reconcilePhaseTiming(input: ReconcileInput): ReconcileResult {
       const count = segments.length;
       if (count > 0) {
         const perGap = Math.round(remainingMs / count);
-        let assigned = 0;
         for (const [i, s] of segments.entries()) {
           if (i === count - 1) {
-            s.scheduled_pause_after_ms = Math.max(0, remainingMs - assigned);
+            s.scheduled_pause_after_ms = Math.max(0, remainingMs - perGap * (count - 1));
           } else {
             s.scheduled_pause_after_ms = perGap;
-            assigned += perGap;
           }
           reconciled.push(s);
         }
