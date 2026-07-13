@@ -4,6 +4,15 @@ import type { CompilerInput } from "../session/derive";
 
 const FIXTURE_INPUT: CompilerInput = {
   goal_version_id: "550e8400-e29b-41d4-a716-446655440000",
+  raw: {
+    goal_statement: "Test goal statement here.",
+    localization: { timeframe: "90d", place: "Test place" },
+    triangulation: ["prereq one here", "prereq two here", "prereq three here"],
+    not_list: ["not one", "not two"],
+    wrong_direction_pulls: [],
+    features: ["email from manager", "badge at lobby", "paycheck on friday"],
+    sync_actions: [{ action: "send the email" }],
+  },
   goal_statement: "Test goal statement here.",
   localization: { timeframe: "90d", place: "Test place" },
   triangulation: ["prereq one here", "prereq two here", "prereq three here"],

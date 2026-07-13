@@ -3,7 +3,7 @@ import { normalizeManifest } from "../compiler/normalize";
 import { COMPILER_PROMPT_V1_4, PROMPT_VERSION } from "../compiler/prompt.v1.4";
 import { stripCodeFences } from "../compiler/strip-fences";
 import { validateManifest, type Manifest } from "../contracts/manifest";
-import type { CompilerInput } from "../session/derive";
+import { compilerInputForModel, type CompilerInput } from "../session/derive";
 
 export type CompileMessageClient = Pick<Anthropic, "messages">;
 
@@ -60,7 +60,7 @@ export async function compileManifest(
   const model = process.env.LLM_MODEL ?? "claude-sonnet-4-6";
   const client = options?.client ?? new Anthropic({ apiKey: apiKey! });
 
-  let userMessage = JSON.stringify(compilerInput);
+  let userMessage = JSON.stringify(compilerInputForModel(compilerInput));
   let lastErrors: string[] = [];
   let lastRawText = "";
   const attempts: CompileAttemptInfo[] = [];
@@ -98,7 +98,7 @@ export async function compileManifest(
       attempts.push(attemptInfo);
       options?.onAttempt?.(attemptInfo);
       if (attempt === 1) break;
-      userMessage = `${JSON.stringify(compilerInput)}\n\nVALIDATOR ERRORS (fix and re-emit):\n${lastErrors.join("\n")}${RETRY_SUFFIX}`;
+      userMessage = `${JSON.stringify(compilerInputForModel(compilerInput))}\n\nVALIDATOR ERRORS (fix and re-emit):\n${lastErrors.join("\n")}${RETRY_SUFFIX}`;
       continue;
     }
 
@@ -143,7 +143,7 @@ export async function compileManifest(
     options?.onAttempt?.(attemptInfo);
 
     if (attempt === 0) {
-      userMessage = `${JSON.stringify(compilerInput)}\n\nVALIDATOR ERRORS (fix and re-emit):\n${lastErrors.join("\n")}${RETRY_SUFFIX}`;
+      userMessage = `${JSON.stringify(compilerInputForModel(compilerInput))}\n\nVALIDATOR ERRORS (fix and re-emit):\n${lastErrors.join("\n")}${RETRY_SUFFIX}`;
     }
   }
 

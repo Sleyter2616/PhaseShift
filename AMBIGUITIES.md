@@ -133,3 +133,15 @@ Recorded ambiguities from `docs/blueprint.md` where the Phase 0 prompt or bluepr
 **Ambiguity:** Wizard step 7 collects optional `aos_layer` (ego/self/persona/shadow) and persists it on `goals.aos_layer`, but compiler prompt ≤v1.3 does not reference it in INPUT or step instructions.
 
 **Proposed resolution:** `aos_layer` is collected but unconsumed by compiler ≤v1.3; semantics scheduled with the v0.5 prompt.
+
+---
+
+## §2.2 — Raw vs normalized compiler input and dedupe identity (Phase 4.5.0)
+
+**Ambiguity:** Intake strings are stored raw on `goals` / `goal_versions` for display, but the compiler must quote speech-safe forms (currency, dates, counts, clock times). It is unclear whether `content_hash` / `dedupe_key` should hash raw intake, normalized compiler input, or compiled segment text.
+
+**Resolution (applied in Phase 4.5.0):** `buildCompilerInput()` persists **both** shapes on `scripts.compiler_input`:
+- `raw` — exact wizard strings (goal, localization, triangulation, not_list, features, sync_actions) for display and audit.
+- Top-level string fields — deterministic `normalizeSpeech()` output fed to the LLM (`compilerInputForModel()` omits `raw` from the user message).
+
+**Dedupe key uses compiled segment text only:** `content_hash` / `audio_files.dedupe_key` hash the **post-compile segment `text`** (plus voice/model/settings), never raw intake and never `compiler_input.raw`. Recompilation that changes wording breaks dedupe even when semantics match (see §1.2B D8). Verbatim QA against segment text should use the **normalized** compiler-input strings, not `goal_versions` raw columns.

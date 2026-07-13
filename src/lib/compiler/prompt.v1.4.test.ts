@@ -18,5 +18,8 @@ describe("prompt.v1.4", () => {
     expect(COMPILER_PROMPT_V1_4).toContain("Introduce every countdown before it begins");
     expect(COMPILER_PROMPT_V1_4).toContain("one explicit transition sentence naming the shift");
     expect(COMPILER_PROMPT_V1_4).toContain("Never read dates as digit sequences");
+    expect(COMPILER_PROMPT_V1_4).toContain(
+      "All numerals, currency, and dates in output must be written as spoken words",
+    );
   });
 });
