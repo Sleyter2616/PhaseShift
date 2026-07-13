@@ -5,6 +5,8 @@ import type { PlaybackManifest } from "@/lib/playback/manifest";
 import { EntrainmentEngine, type EntrainmentMode } from "@/lib/audio/engine";
 import { JitDecodeWindow } from "@/lib/audio/decode-window";
 import {
+  buildSeekPlan,
+  clampSeekTarget,
   computeSegmentSchedule,
   deriveGlideBoundaries,
   glidesDueInWindow,
@@ -158,6 +160,8 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
   const [exitAlertness, setExitAlertness] = useState(3);
   const [error, setError] = useState<string | null>(null);
   const [debug, setDebug] = useState<DebugSnapshot>(EMPTY_DEBUG);
+  const [scrubSec, setScrubSec] = useState<number | null>(null);
+  const [showForwardSeekHint, setShowForwardSeekHint] = useState(false);
 
   const engineRef = useRef<EntrainmentEngine | null>(null);
   const decodeWindowRef = useRef(new JitDecodeWindow(3));
@@ -171,6 +175,8 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
   const debugTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const clockStatusRef = useRef<DebugSnapshot["clock"]>("unknown");
   const attemptRef = useRef<DebugSnapshot["attempt"]>(null);
+  const scrubWasPlayingRef = useRef(false);
+  const forwardSeekHintSeenRef = useRef(false);
 
   const updateDebugSnapshot = useCallback(() => {
     const engine = engineRef.current;
@@ -363,6 +369,115 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
     }
   }, [ensureDecoded, glideBoundaries, isTestGeneration, releaseWakeLock, schedule, totalSec, updateDebugSnapshot]);
 
+  const maybeShowForwardSeekHint = useCallback((deltaSec: number) => {
+    if (deltaSec > 0 && !forwardSeekHintSeenRef.current) {
+      forwardSeekHintSeenRef.current = true;
+      setShowForwardSeekHint(true);
+    }
+  }, []);
+
+  const seekTo = useCallback(
+    async (targetSec: number) => {
+      const engine = engineRef.current;
+      if (!engine || sessionStartCtxTimeRef.current == null) return;
+      if (stage !== "playing" && stage !== "paused") return;
+
+      const plan = buildSeekPlan(
+        schedule,
+        glideBoundaries,
+        manifest.segments.map((segment) => ({
+          seq: segment.seq,
+          entrainment_hz: segment.entrainment_hz,
+        })),
+        targetSec,
+        totalSec,
+      );
+
+      engine.stopAllVoices();
+      scheduledVoicesRef.current = new Set(plan.completedVoiceSeqs);
+      triggeredGlidesRef.current = new Set(plan.triggeredGlideKeys);
+
+      const ctxNow = engine.audioContext.currentTime;
+      sessionStartCtxTimeRef.current = ctxNow - plan.targetSec;
+      engine.setBeatHzImmediate(plan.entrainmentHz);
+
+      setElapsedSec(plan.targetSec);
+      setCurrentPhase(phaseAtElapsed(schedule, plan.targetSec));
+
+      if (
+        !isTestGeneration &&
+        plan.position.segmentSeq != null &&
+        plan.position.inVoice
+      ) {
+        const seq = plan.position.segmentSeq;
+        await ensureDecoded(seq);
+        const buffer = decodeWindowRef.current.get<AudioBuffer>(seq);
+        if (buffer) {
+          const source = engine.scheduleVoice(
+            buffer,
+            ctxNow,
+            plan.position.intraSegmentOffsetSec,
+          );
+          scheduledVoicesRef.current.add(seq);
+          source.onended = () => {
+            decodeWindowRef.current.markPlayed(seq);
+          };
+        }
+      }
+
+      updateDebugSnapshot();
+      runSchedulerTick();
+    },
+    [
+      ensureDecoded,
+      glideBoundaries,
+      isTestGeneration,
+      manifest.segments,
+      runSchedulerTick,
+      schedule,
+      stage,
+      totalSec,
+      updateDebugSnapshot,
+    ],
+  );
+
+  const handleSeekRelative = useCallback(
+    (deltaSec: number) => {
+      const base = scrubSec ?? elapsedSec;
+      maybeShowForwardSeekHint(deltaSec);
+      void seekTo(base + deltaSec);
+    },
+    [elapsedSec, maybeShowForwardSeekHint, scrubSec, seekTo],
+  );
+
+  const handleScrubStart = useCallback(() => {
+    scrubWasPlayingRef.current = stage === "playing";
+    if (scrubWasPlayingRef.current) {
+      void engineRef.current?.suspend();
+      setStage("paused");
+    }
+    setScrubSec(elapsedSec);
+  }, [elapsedSec, stage]);
+
+  const handleScrubChange = useCallback((value: number) => {
+    setScrubSec(clampSeekTarget(value, totalSec));
+  }, [totalSec]);
+
+  const handleScrubEnd = useCallback(
+    async (value: number) => {
+      const target = clampSeekTarget(value, totalSec);
+      maybeShowForwardSeekHint(target - elapsedSec);
+      setScrubSec(null);
+      await seekTo(target);
+      if (scrubWasPlayingRef.current) {
+        await engineRef.current?.resume();
+        setStage("playing");
+        void requestWakeLock();
+      }
+    },
+    [elapsedSec, maybeShowForwardSeekHint, requestWakeLock, seekTo, totalSec],
+  );
+
   const startPlayback = useCallback(async () => {
     setError(null);
     setStage("loading");
@@ -536,6 +651,7 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
   }, [disposeEngine, elapsedSec, exitAlertness, sessionId]);
 
   const engineReady = stage === "playing" || stage === "paused";
+  const displayElapsedSec = scrubSec ?? elapsedSec;
 
   const debugStrip = (
     <AudioDebugStrip
@@ -673,9 +789,47 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
           <p className="text-xs uppercase tracking-wide text-neutral-500">Current phase</p>
           <p className="text-2xl font-semibold capitalize">{currentPhase ?? "—"}</p>
           <p className="text-sm text-neutral-600">
-            {formatTime(elapsedSec)} / {formatTime(totalSec)}
+            {formatTime(displayElapsedSec)} / {formatTime(totalSec)}
           </p>
         </header>
+
+        <div className="space-y-3">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              aria-label="Back 15 seconds"
+              onClick={() => handleSeekRelative(-15)}
+              className="rounded border border-neutral-300 px-3 py-1.5 text-sm font-medium"
+            >
+              |&lt;-15s
+            </button>
+            <input
+              type="range"
+              min={0}
+              max={totalSec}
+              step={0.1}
+              value={displayElapsedSec}
+              onPointerDown={handleScrubStart}
+              onChange={(event) => handleScrubChange(Number(event.target.value))}
+              onPointerUp={(event) => void handleScrubEnd(Number(event.currentTarget.value))}
+              className="w-full"
+              aria-label="Session scrub bar"
+            />
+            <button
+              type="button"
+              aria-label="Forward 15 seconds"
+              onClick={() => handleSeekRelative(15)}
+              className="rounded border border-neutral-300 px-3 py-1.5 text-sm font-medium"
+            >
+              +15s-&gt;|
+            </button>
+          </div>
+          {showForwardSeekHint ? (
+            <p className="text-xs text-neutral-500">
+              Skipping ahead may reduce the induction effect.
+            </p>
+          ) : null}
+        </div>
 
         <div className="space-y-4 rounded border border-neutral-200 p-4">
           <div className="flex gap-2">

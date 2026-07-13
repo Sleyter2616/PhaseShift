@@ -7,6 +7,10 @@ import {
   voicesDueInWindow,
   glidesDueInWindow,
   upcomingSegmentSeqs,
+  buildSeekPlan,
+  clampSeekTarget,
+  resolveSeekPosition,
+  voiceSeqsCompletedBySeek,
 } from "./scheduler";
 
 export const PLAYBACK_FIXTURE: PlaybackManifest = {
@@ -103,5 +107,66 @@ describe("lookahead windows", () => {
     const schedule = computeSegmentSchedule(PLAYBACK_FIXTURE.segments);
     expect(upcomingSegmentSeqs(schedule, 0, 5, 2)).toEqual([2, 3]);
     expect(upcomingSegmentSeqs(schedule, 0, 12, 2)).toEqual([3]);
+  });
+});
+
+describe("seekTo offset math", () => {
+  it("clamps seek targets to session bounds", () => {
+    const schedule = computeSegmentSchedule(PLAYBACK_FIXTURE.segments);
+    expect(clampSeekTarget(-5, totalPlaybackSec(schedule))).toBe(0);
+    expect(clampSeekTarget(999, totalPlaybackSec(schedule))).toBe(30);
+  });
+
+  it("resolves intra-segment offset mid-voice and mid-pause", () => {
+    const schedule = computeSegmentSchedule(PLAYBACK_FIXTURE.segments);
+    const total = totalPlaybackSec(schedule);
+
+    expect(resolveSeekPosition(schedule, 5, total)).toEqual({
+      targetSec: 5,
+      segmentSeq: 1,
+      intraSegmentOffsetSec: 5,
+      inVoice: true,
+      segmentStartSec: 0,
+    });
+
+    expect(resolveSeekPosition(schedule, 19, total)).toEqual({
+      targetSec: 19,
+      segmentSeq: 2,
+      intraSegmentOffsetSec: 0,
+      inVoice: false,
+      segmentStartSec: 10,
+    });
+  });
+
+  it("marks completed voices and glides when seeking forward", () => {
+    const schedule = computeSegmentSchedule(PLAYBACK_FIXTURE.segments);
+    const glides = deriveGlideBoundaries(schedule, PLAYBACK_FIXTURE.meta.entrainment_plan);
+    const plan = buildSeekPlan(
+      schedule,
+      glides,
+      PLAYBACK_FIXTURE.segments.map((segment) => ({
+        seq: segment.seq,
+        entrainment_hz: segment.entrainment_hz,
+      })),
+      21,
+      totalPlaybackSec(schedule),
+    );
+
+    expect(plan.completedVoiceSeqs).toEqual([1, 2]);
+    expect(plan.triggeredGlideKeys).toEqual(["beta:10", "alpha:20"]);
+    expect(plan.entrainmentHz).toBe(6);
+    expect(plan.position).toEqual({
+      targetSec: 21,
+      segmentSeq: 3,
+      intraSegmentOffsetSec: 1,
+      inVoice: true,
+      segmentStartSec: 20,
+    });
+  });
+
+  it("resets completed voices when seeking backward", () => {
+    const schedule = computeSegmentSchedule(PLAYBACK_FIXTURE.segments);
+    expect(voiceSeqsCompletedBySeek(schedule, 3)).toEqual([]);
+    expect(voiceSeqsCompletedBySeek(schedule, 11)).toEqual([1]);
   });
 });

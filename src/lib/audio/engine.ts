@@ -18,6 +18,7 @@ export class EntrainmentEngine {
   private readonly carrierHz: number;
   private currentBeatHz = 10;
   private bedNodes: AudioScheduledSourceNode[] = [];
+  private activeVoiceSources: AudioBufferSourceNode[] = [];
   private oscB: OscillatorNode | null = null;
   private lfo: OscillatorNode | null = null;
   private disposed = false;
@@ -150,12 +151,37 @@ export class EntrainmentEngine {
     }
   }
 
-  scheduleVoice(buffer: AudioBuffer, atCtxTime: number): AudioBufferSourceNode {
+  scheduleVoice(buffer: AudioBuffer, atCtxTime: number, offsetSec = 0): AudioBufferSourceNode {
     const src = this.ctx.createBufferSource();
     src.buffer = buffer;
     src.connect(this.voiceGain);
-    src.start(atCtxTime);
+    if (offsetSec > 0) {
+      src.start(atCtxTime, offsetSec);
+    } else {
+      src.start(atCtxTime);
+    }
+    this.activeVoiceSources.push(src);
+    src.onended = () => {
+      const index = this.activeVoiceSources.indexOf(src);
+      if (index >= 0) this.activeVoiceSources.splice(index, 1);
+    };
     return src;
+  }
+
+  stopAllVoices(): void {
+    for (const src of this.activeVoiceSources) {
+      try {
+        src.stop();
+      } catch {
+        // already stopped
+      }
+      src.disconnect();
+    }
+    this.activeVoiceSources = [];
+  }
+
+  setBeatHzImmediate(beatHz: number): void {
+    this.startBed(beatHz);
   }
 
   isBedActive(): boolean {
@@ -185,6 +211,7 @@ export class EntrainmentEngine {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.stopAllVoices();
     this.stopBed();
     void this.ctx.close();
   }

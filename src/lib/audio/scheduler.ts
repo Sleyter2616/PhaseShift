@@ -173,3 +173,110 @@ export function upcomingSegmentSeqs(
     .slice(0, limit)
     .map((entry) => entry.seq);
 }
+
+export function clampSeekTarget(targetSec: number, totalSec: number): number {
+  if (totalSec <= 0) return 0;
+  return Math.max(0, Math.min(targetSec, totalSec));
+}
+
+export interface SeekResolvedPosition {
+  targetSec: number;
+  segmentSeq: number | null;
+  intraSegmentOffsetSec: number;
+  inVoice: boolean;
+  segmentStartSec: number;
+}
+
+export function resolveSeekPosition(
+  schedule: ReadonlyArray<SegmentSchedule>,
+  targetSec: number,
+  totalSec: number,
+): SeekResolvedPosition {
+  const clamped = clampSeekTarget(targetSec, totalSec);
+  const segmentSeq = segmentSeqAtElapsed(schedule, clamped);
+  if (segmentSeq == null) {
+    const last = schedule.at(-1);
+    return {
+      targetSec: clamped,
+      segmentSeq: last?.seq ?? null,
+      intraSegmentOffsetSec: 0,
+      inVoice: false,
+      segmentStartSec: last?.startSec ?? 0,
+    };
+  }
+
+  const entry = schedule.find((item) => item.seq === segmentSeq);
+  if (!entry) {
+    return {
+      targetSec: clamped,
+      segmentSeq,
+      intraSegmentOffsetSec: 0,
+      inVoice: false,
+      segmentStartSec: 0,
+    };
+  }
+
+  const offsetInSegment = clamped - entry.startSec;
+  const inVoice = offsetInSegment < entry.voiceDurationSec;
+  return {
+    targetSec: clamped,
+    segmentSeq,
+    intraSegmentOffsetSec: inVoice ? offsetInSegment : 0,
+    inVoice,
+    segmentStartSec: entry.startSec,
+  };
+}
+
+export function voiceSeqsCompletedBySeek(
+  schedule: ReadonlyArray<SegmentSchedule>,
+  targetSec: number,
+): number[] {
+  return schedule
+    .filter((entry) => entry.startSec + entry.voiceDurationSec <= targetSec + 1e-6)
+    .map((entry) => entry.seq);
+}
+
+export function glideKeysTriggeredBefore(
+  boundaries: ReadonlyArray<GlideBoundary>,
+  targetSec: number,
+): string[] {
+  return boundaries
+    .filter((glide) => glide.atSec < targetSec - 1e-6)
+    .map((glide) => `${glide.fromPhase}:${glide.atSec}`);
+}
+
+export interface SeekPlanSegment {
+  seq: number;
+  entrainment_hz: number;
+}
+
+export interface SeekPlan {
+  targetSec: number;
+  position: SeekResolvedPosition;
+  completedVoiceSeqs: number[];
+  triggeredGlideKeys: string[];
+  entrainmentHz: number;
+}
+
+export function buildSeekPlan(
+  schedule: ReadonlyArray<SegmentSchedule>,
+  glideBoundaries: ReadonlyArray<GlideBoundary>,
+  segments: ReadonlyArray<SeekPlanSegment>,
+  targetSec: number,
+  totalSec: number,
+): SeekPlan {
+  const position = resolveSeekPosition(schedule, targetSec, totalSec);
+  const landed =
+    position.segmentSeq != null
+      ? segments.find((segment) => segment.seq === position.segmentSeq)
+      : undefined;
+  const fallbackHz = segments[0]?.entrainment_hz ?? 10;
+
+  return {
+    targetSec: position.targetSec,
+    position,
+    completedVoiceSeqs: voiceSeqsCompletedBySeek(schedule, position.targetSec),
+    triggeredGlideKeys: glideKeysTriggeredBefore(glideBoundaries, position.targetSec),
+    entrainmentHz: landed?.entrainment_hz ?? fallbackHz,
+  };
+}
