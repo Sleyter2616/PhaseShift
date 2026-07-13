@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { PHASE_BUDGET_SEC } from "../costs";
-import { deriveSessionFromIntake, DEFAULT_ENTRAINMENT_PLAN } from "./derive";
+import {
+  buildCompilerInput,
+  compilerInputForModel,
+  deriveSessionFromIntake,
+  DEFAULT_ENTRAINMENT_PLAN,
+} from "./derive";
 import { intake20Min, intake40Min } from "../fixtures/intake";
 import type { Intake } from "../contracts/intake";
 
@@ -29,5 +34,37 @@ describe("deriveSessionFromIntake", () => {
     const session = deriveSessionFromIntake(intake20Min);
     expect(session.duration_min).toBe(20);
     expect(session.phase_budget_sec.theta).toBe(780);
+  });
+});
+
+describe("buildCompilerInput", () => {
+  it("stores raw intake and normalized speech fields for the model", () => {
+    const input = buildCompilerInput(intake40Min, "550e8400-e29b-41d4-a716-446655440000");
+    expect(input.raw.goal_statement).toBe(intake40Min.goal_statement);
+    expect(input.raw.localization.timeframe).toBe("90d");
+    expect(input.raw.sync_actions[1]?.deadline).toBe("2026-07-14");
+    expect(input.localization.timeframe).toBe("ninety days");
+    expect(input.sync_actions[1]?.deadline).toBe("July fourteenth, twenty twenty-six");
+    expect(compilerInputForModel(input)).not.toHaveProperty("raw");
+  });
+
+  it("normalizes currency and clock times inside intake strings", () => {
+    const intake: Intake = {
+      ...intake40Min,
+      goal_statement: "The $1M role is mine after the 9 AM offer call.",
+      features: [
+        "paycheck shows $83,333 base on the 15th",
+        "badge scan logs 24/7 lobby entry",
+        "email titled Senior Engineer arrives Monday",
+      ],
+    };
+    const input = buildCompilerInput(intake, "550e8400-e29b-41d4-a716-446655440000");
+    expect(input.goal_statement).toBe(
+      "The one million dollars role is mine after the nine A M offer call.",
+    );
+    expect(input.features[0]).toBe(
+      "paycheck shows eighty-three thousand three hundred thirty-three dollars base on the 15th",
+    );
+    expect(input.features[1]).toBe("badge scan logs 24/7 lobby entry");
   });
 });

@@ -1,5 +1,10 @@
 import type { Intake } from "../contracts/intake";
 import { PACING_WPM, PHASE_BUDGET_SEC, type DurationPreset } from "../costs";
+import {
+  toSpeakableText,
+  normalizeDeadlineValue,
+  normalizeTimeframeValue,
+} from "../compiler/speech-normalize";
 
 export const DEFAULT_ENTRAINMENT_PLAN = [
   { phase: "beta" as const, hz: 18, glide_to: 10, glide_sec: 45 },
@@ -42,10 +47,21 @@ export function deriveSessionFromIntake(intake: Intake): DerivedSession {
   };
 }
 
-export interface CompilerInput {
-  goal_version_id: string;
+export interface CompilerIntakeSnapshot {
   goal_statement: string;
   localization: Intake["localization"];
+  triangulation: Intake["triangulation"];
+  not_list: Intake["not_list"];
+  wrong_direction_pulls: Intake["wrong_pulls"];
+  features: Intake["features"];
+  sync_actions: Intake["sync_actions"];
+}
+
+export interface CompilerInput {
+  goal_version_id: string;
+  raw: CompilerIntakeSnapshot;
+  goal_statement: string;
+  localization: { timeframe: string; place: string };
   triangulation: Intake["triangulation"];
   not_list: Intake["not_list"];
   wrong_direction_pulls: Intake["wrong_pulls"];
@@ -56,10 +72,8 @@ export interface CompilerInput {
   session: DerivedSession;
 }
 
-export function buildCompilerInput(intake: Intake, goalVersionId: string): CompilerInput {
-  const session = deriveSessionFromIntake(intake);
+function snapshotIntakeFields(intake: Intake): CompilerIntakeSnapshot {
   return {
-    goal_version_id: goalVersionId,
     goal_statement: intake.goal_statement,
     localization: intake.localization,
     triangulation: intake.triangulation,
@@ -67,6 +81,37 @@ export function buildCompilerInput(intake: Intake, goalVersionId: string): Compi
     wrong_direction_pulls: intake.wrong_pulls,
     features: intake.features,
     sync_actions: intake.sync_actions,
+  };
+}
+
+export function compilerInputForModel(
+  input: CompilerInput,
+): Omit<CompilerInput, "raw"> {
+  const { raw, ...modelInput } = input;
+  void raw;
+  return modelInput;
+}
+
+export function buildCompilerInput(intake: Intake, goalVersionId: string): CompilerInput {
+  const session = deriveSessionFromIntake(intake);
+  const raw = snapshotIntakeFields(intake);
+
+  return {
+    goal_version_id: goalVersionId,
+    raw,
+    goal_statement: toSpeakableText(intake.goal_statement),
+    localization: {
+      timeframe: normalizeTimeframeValue(intake.localization.timeframe),
+      place: toSpeakableText(intake.localization.place),
+    },
+    triangulation: intake.triangulation.map((item) => toSpeakableText(item)) as Intake["triangulation"],
+    not_list: intake.not_list.map((item) => toSpeakableText(item)),
+    wrong_direction_pulls: intake.wrong_pulls.map((item) => toSpeakableText(item)),
+    features: intake.features.map((item) => toSpeakableText(item)),
+    sync_actions: intake.sync_actions.map((action) => ({
+      action: toSpeakableText(action.action),
+      ...(action.deadline ? { deadline: normalizeDeadlineValue(action.deadline) } : {}),
+    })),
     senses_emphasis: intake.session.senses_emphasis,
     ...(intake.session.aos_layer ? { aos_layer: intake.session.aos_layer } : {}),
     session,

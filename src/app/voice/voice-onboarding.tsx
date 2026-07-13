@@ -4,9 +4,14 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import {
   VOICE_CLONE_READING_PASSAGE,
+  VOICE_SAMPLE_MAX_SEC,
   VOICE_SAMPLE_MIN_SEC,
   VOICE_SAMPLE_TARGET_SEC,
 } from "@/lib/voice/reading-passage";
+import {
+  buildVoiceRecorderOptions,
+  VOICE_RECORDING_BITS_PER_SECOND,
+} from "@/lib/voice/recorder-config";
 import { confirmVoiceConsent } from "./actions";
 
 interface VoiceOnboardingProps {
@@ -30,6 +35,10 @@ export function VoiceOnboarding({
   const [recording, setRecording] = useState(false);
   const [elapsedSec, setElapsedSec] = useState(0);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+  const [recordingFormat, setRecordingFormat] = useState<{
+    mimeType: string;
+    audioBitsPerSecond: number;
+  } | null>(null);
   const [recordError, setRecordError] = useState<string | null>(null);
   const [submitPending, setSubmitPending] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -67,12 +76,24 @@ export function VoiceOnboarding({
   async function startRecording() {
     setRecordError(null);
     setAudioBlob(null);
+    setRecordingFormat(null);
     setElapsedSec(0);
     chunksRef.current = [];
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
+      const recorderOptions = buildVoiceRecorderOptions((mime) =>
+        MediaRecorder.isTypeSupported(mime),
+      );
+      const recorder = new MediaRecorder(
+        stream,
+        recorderOptions.mimeType
+          ? {
+              mimeType: recorderOptions.mimeType,
+              audioBitsPerSecond: recorderOptions.audioBitsPerSecond,
+            }
+          : { audioBitsPerSecond: recorderOptions.audioBitsPerSecond },
+      );
       mediaRecorderRef.current = recorder;
 
       recorder.ondataavailable = (event) => {
@@ -81,8 +102,13 @@ export function VoiceOnboarding({
 
       recorder.onstop = () => {
         stream.getTracks().forEach((track) => track.stop());
-        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        const mimeType = recorder.mimeType || recorderOptions.mimeType || "audio/webm";
+        const blob = new Blob(chunksRef.current, { type: mimeType });
         setAudioBlob(blob);
+        setRecordingFormat({
+          mimeType,
+          audioBitsPerSecond: recorderOptions.audioBitsPerSecond,
+        });
         setRecording(false);
         if (timerRef.current) {
           clearInterval(timerRef.current);
@@ -95,7 +121,7 @@ export function VoiceOnboarding({
       timerRef.current = setInterval(() => {
         setElapsedSec((current) => {
           const next = current + 1;
-          if (next >= VOICE_SAMPLE_TARGET_SEC) {
+          if (next >= VOICE_SAMPLE_MAX_SEC) {
             mediaRecorderRef.current?.stop();
           }
           return next;
@@ -190,6 +216,7 @@ export function VoiceOnboarding({
             setShowRecorder(true);
             setSubmitError(null);
             setAudioBlob(null);
+            setRecordingFormat(null);
             setElapsedSec(0);
           }}
           className="rounded border border-neutral-300 px-4 py-2 text-sm"
@@ -260,12 +287,24 @@ export function VoiceOnboarding({
       </div>
 
       <p className="text-sm text-neutral-600">
-        Target ~{VOICE_SAMPLE_TARGET_SEC}s of clear speech (minimum {VOICE_SAMPLE_MIN_SEC}s).
+        Target ~{VOICE_SAMPLE_TARGET_SEC}s of clear speech (minimum {VOICE_SAMPLE_MIN_SEC}s, up to{" "}
+        {VOICE_SAMPLE_MAX_SEC}s). Longer samples usually improve clone fidelity — read through the
+        passage again if you want a fuller capture.
       </p>
 
       <p className="font-mono text-sm">
-        {elapsedSec}s / {VOICE_SAMPLE_TARGET_SEC}s
+        {elapsedSec}s / {VOICE_SAMPLE_MAX_SEC}s max
       </p>
+
+      {recordingFormat ? (
+        <p className="font-mono text-xs text-neutral-600">
+          Recorded as {recordingFormat.mimeType || "unknown"} @{" "}
+          {Math.round(recordingFormat.audioBitsPerSecond / 1000)} kbps
+          {recordingFormat.audioBitsPerSecond === VOICE_RECORDING_BITS_PER_SECOND
+            ? " (requested)"
+            : ""}
+        </p>
+      ) : null}
 
       {recordError ? <p className="text-sm text-red-700">{recordError}</p> : null}
 

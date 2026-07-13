@@ -100,4 +100,59 @@ describe("reconcilePhaseTiming", () => {
     }
     expect(result.overBudgetPhases).toContain("beta");
   });
+
+  it("fallback emits integers and closes the phase when voiced durations have float dust", () => {
+    const actual = 71.48333333;
+    const count = 30;
+    const voicedSec = actual * count;
+    const budgetSec = voicedSec + 27.228;
+
+    const segments = Array.from({ length: count }, () => ({
+      phase: "theta" as const,
+      pause_after_ms: 0,
+      actual_duration_sec: actual,
+    }));
+
+    const result = reconcilePhaseTiming({
+      phaseBudgetSec: { beta: 0, alpha: 0, theta: budgetSec, gamma: 0 },
+      segments,
+    });
+
+    const theta = result.segments.filter((s) => s.phase === "theta");
+    expect(theta).toHaveLength(count);
+
+    for (const segment of theta) {
+      expect(Number.isInteger(segment.scheduled_pause_after_ms)).toBe(true);
+      expect(segment.scheduled_pause_after_ms).toBeGreaterThanOrEqual(0);
+    }
+
+    const totalPauseMs = theta.reduce((sum, s) => sum + (s.scheduled_pause_after_ms ?? 0), 0);
+    const expectedRemainingMs = Math.max(0, Math.round(budgetSec * 1000 - voicedSec * 1000));
+    expect(totalPauseMs).toBe(expectedRemainingMs);
+
+    const phaseTotalMs = Math.round(voicedSec * 1000) + totalPauseMs;
+    expect(phaseTotalMs).toBe(Math.round(budgetSec * 1000));
+  });
+
+  it("scale branch emits integers when voiced durations have float dust", () => {
+    const actual = 71.48333333;
+    const result = reconcilePhaseTiming({
+      phaseBudgetSec: { beta: 250, alpha: 0, theta: 0, gamma: 0 },
+      segments: [
+        { phase: "beta", pause_after_ms: 2000, actual_duration_sec: actual },
+        { phase: "beta", pause_after_ms: 2000, actual_duration_sec: actual },
+        { phase: "beta", pause_after_ms: 2000, actual_duration_sec: actual },
+      ],
+    });
+
+    const beta = result.segments.filter((s) => s.phase === "beta");
+    for (const segment of beta) {
+      expect(Number.isInteger(segment.scheduled_pause_after_ms)).toBe(true);
+      expect(segment.scheduled_pause_after_ms).toBeGreaterThanOrEqual(0);
+    }
+
+    const voicedSec = beta.reduce((sum, s) => sum + s.actual_duration_sec, 0);
+    const pauseMs = beta.reduce((sum, s) => sum + (s.scheduled_pause_after_ms ?? 0), 0);
+    expect(Math.round(voicedSec * 1000) + pauseMs).toBe(Math.round(250 * 1000));
+  });
 });

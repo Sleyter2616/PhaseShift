@@ -79,4 +79,20 @@ describe("ElevenLabsProvider", () => {
     const provider = new ElevenLabsProvider("test-key");
     expect(provider.supportsInlineBreaks).toBe(true);
   });
+
+  it("rejects uuid-shaped voiceId before any network call", async () => {
+    const provider = new ElevenLabsProvider("test-key");
+    await expect(
+      provider.synthesize({
+        text: "hi",
+        voiceId: "a1b2c3d4-e5f6-4a78-9abc-def012345678",
+        modelId: "m",
+        settings: {},
+      }),
+    ).rejects.toMatchObject({
+      retriable: false,
+      message: "voiceId looks like an internal uuid — wiring bug",
+    } satisfies Partial<TTSProviderError>);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

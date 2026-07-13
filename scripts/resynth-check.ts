@@ -8,7 +8,7 @@ import {
 } from "../src/lib/pipeline/dedupe-plan";
 import { resynthPreconditionError } from "../src/lib/pipeline/resynth-guard";
 import { runSynthesizeSegment } from "../src/lib/pipeline/synthesize-segment-job";
-import { resolveSynthesisIdentity } from "../src/lib/pipeline/synthesis-identity";
+import { loadScriptSynthesisIdentity } from "../src/lib/pipeline/synthesis-identity";
 
 function loadEnvLocal(): void {
   const envPath = resolve(process.cwd(), ".env.local");
@@ -54,7 +54,7 @@ async function main() {
     process.exit(1);
   }
 
-  const synthesisIdentity = resolveSynthesisIdentity(script);
+  const synthesisIdentity = await loadScriptSynthesisIdentity(supabase, script);
   const dedupeCtx = {
     userId: script.user_id,
     assetScope: synthesisIdentity.assetScope,

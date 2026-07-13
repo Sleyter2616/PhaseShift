@@ -2,13 +2,13 @@ import { z } from "zod";
 import { NextResponse } from "next/server";
 import { isInsufficientCreditsError } from "@/lib/auth/session";
 import { createScriptBodySchema } from "@/lib/contracts/intake";
-import { PROMPT_VERSION } from "@/lib/compiler/prompt.v1.3";
+import { PROMPT_VERSION } from "@/lib/compiler/prompt.v1.4";
 import { GENERATION_COST_CREDITS } from "@/lib/costs";
 import { getServiceClient } from "@/lib/db/service-client";
 import { inngest } from "@/inngest/client";
 import { buildCompilerInput } from "@/lib/session/derive";
 import {
-  defaultTtsModelId,
+  defaultTtsModelIdForScript,
   defaultTtsProvider,
 } from "@/lib/pipeline/synthesis-identity";
 import { createClient } from "@/lib/supabase/server";
@@ -31,7 +31,6 @@ export async function POST(request: Request) {
     const { voice_profile_id: requestedVoiceProfileId, ...intake } = parsed;
 
     const provider = defaultTtsProvider();
-    const ttsModelId = defaultTtsModelId();
     const stockVoiceId =
       provider === "selfhost"
         ? (process.env.ELEVENLABS_STOCK_VOICE_ID ?? "mock-voice")
@@ -66,6 +65,8 @@ export async function POST(request: Request) {
         { status: 500 },
       );
     }
+
+    const ttsModelId = defaultTtsModelIdForScript(voiceProfileId);
 
     const title = intake.goal_statement.slice(0, 80);
     let goalId: string;

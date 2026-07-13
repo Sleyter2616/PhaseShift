@@ -1,5 +1,6 @@
 import type { AssetScope } from "../tts/dedupe";
 import type { TtsProviderId } from "../tts/provider";
+import type { ServiceClient } from "../db/service-client";
 
 export interface SynthesisIdentity {
   provider: TtsProviderId;
@@ -20,6 +21,7 @@ export interface ScriptVoiceSource {
 }
 
 export const DEFAULT_ELEVENLABS_MODEL_ID = "eleven_flash_v2_5";
+export const DEFAULT_CLONE_ELEVENLABS_MODEL_ID = "eleven_multilingual_v2";
 
 export const DEFAULT_VOICE_SETTINGS: Record<string, unknown> = {
   stability: 0.5,
@@ -28,6 +30,13 @@ export const DEFAULT_VOICE_SETTINGS: Record<string, unknown> = {
 
 export function defaultTtsModelId(): string {
   return process.env.ELEVENLABS_MODEL_ID ?? DEFAULT_ELEVENLABS_MODEL_ID;
+}
+
+export function defaultTtsModelIdForScript(voiceProfileId: string | null): string {
+  if (voiceProfileId) {
+    return process.env.ELEVENLABS_CLONE_MODEL_ID ?? DEFAULT_CLONE_ELEVENLABS_MODEL_ID;
+  }
+  return defaultTtsModelId();
 }
 
 export function defaultTtsProvider(): TtsProviderId {
@@ -73,4 +82,34 @@ export function buildStoragePath(identity: SynthesisIdentity, audioFileId: strin
     return `shared/${identity.storageScopeKey}/${audioFileId}.mp3`;
   }
   return `${identity.storageScopeKey}/${audioFileId}.mp3`;
+}
+
+export async function loadScriptSynthesisIdentity(
+  supabase: ServiceClient,
+  script: ScriptVoiceSource,
+): Promise<SynthesisIdentity> {
+  if (!script.voice_profile_id) {
+    return resolveSynthesisIdentity(script);
+  }
+
+  if (script.provider_voice_id) {
+    return resolveSynthesisIdentity(script);
+  }
+
+  const { data: profile, error } = await supabase
+    .from("voice_profiles")
+    .select("provider_voice_id")
+    .eq("id", script.voice_profile_id)
+    .single();
+
+  if (error || !profile?.provider_voice_id) {
+    throw new Error(
+      `voice profile missing provider_voice_id: ${error?.message ?? script.voice_profile_id}`,
+    );
+  }
+
+  return resolveSynthesisIdentity({
+    ...script,
+    provider_voice_id: profile.provider_voice_id,
+  });
 }
