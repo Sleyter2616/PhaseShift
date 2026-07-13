@@ -1,5 +1,9 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { normalizeManifest } from "../compiler/normalize";
+import {
+  applySpeakableOutputNormalization,
+  logSpeakableOutputChanges,
+} from "./speakable-output";
 import { COMPILER_PROMPT_V1_4, PROMPT_VERSION } from "../compiler/prompt.v1.4";
 import { stripCodeFences } from "../compiler/strip-fences";
 import { validateManifest, type Manifest } from "../contracts/manifest";
@@ -127,7 +131,9 @@ export async function compileManifest(
         };
         attempts.push(attemptInfo);
         options?.onAttempt?.(attemptInfo);
-        return result.data;
+        const speakable = applySpeakableOutputNormalization(result.data);
+        logSpeakableOutputChanges(speakable.changes);
+        return speakable.manifest;
       }
     } else {
       lastErrors = result.errors;

@@ -1,8 +1,8 @@
 import type { Intake } from "../contracts/intake";
 import { PACING_WPM, PHASE_BUDGET_SEC, type DurationPreset } from "../costs";
 import {
+  toSpeakableText,
   normalizeDeadlineValue,
-  normalizeSpeech,
   normalizeTimeframeValue,
 } from "../compiler/speech-normalize";
 
@@ -99,17 +99,17 @@ export function buildCompilerInput(intake: Intake, goalVersionId: string): Compi
   return {
     goal_version_id: goalVersionId,
     raw,
-    goal_statement: normalizeSpeech(intake.goal_statement),
+    goal_statement: toSpeakableText(intake.goal_statement),
     localization: {
       timeframe: normalizeTimeframeValue(intake.localization.timeframe),
-      place: normalizeSpeech(intake.localization.place),
+      place: toSpeakableText(intake.localization.place),
     },
-    triangulation: intake.triangulation.map((item) => normalizeSpeech(item)) as Intake["triangulation"],
-    not_list: intake.not_list.map((item) => normalizeSpeech(item)),
-    wrong_direction_pulls: intake.wrong_pulls.map((item) => normalizeSpeech(item)),
-    features: intake.features.map((item) => normalizeSpeech(item)),
+    triangulation: intake.triangulation.map((item) => toSpeakableText(item)) as Intake["triangulation"],
+    not_list: intake.not_list.map((item) => toSpeakableText(item)),
+    wrong_direction_pulls: intake.wrong_pulls.map((item) => toSpeakableText(item)),
+    features: intake.features.map((item) => toSpeakableText(item)),
     sync_actions: intake.sync_actions.map((action) => ({
-      action: normalizeSpeech(action.action),
+      action: toSpeakableText(action.action),
       ...(action.deadline ? { deadline: normalizeDeadlineValue(action.deadline) } : {}),
     })),
     senses_emphasis: intake.session.senses_emphasis,

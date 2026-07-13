@@ -12,14 +12,14 @@ describe("prompt.v1.4", () => {
     expect(COMPILER_PROMPT_V1_4).toContain("Banned tokens must not appear anywhere in theta text");
   });
 
-  it("adds founder content rules", () => {
+  it("adds speakable-output and alpha deepening rules", () => {
     expect(COMPILER_PROMPT_V1_4).toContain("## CONTENT RULES (mandatory)");
-    expect(COMPILER_PROMPT_V1_4).toContain("Write all numbers as words");
-    expect(COMPILER_PROMPT_V1_4).toContain("Introduce every countdown before it begins");
-    expect(COMPILER_PROMPT_V1_4).toContain("one explicit transition sentence naming the shift");
-    expect(COMPILER_PROMPT_V1_4).toContain("Never read dates as digit sequences");
     expect(COMPILER_PROMPT_V1_4).toContain(
-      "All numerals, currency, and dates in output must be written as spoken words",
+      'write "one million dollars", not "$1M"',
     );
+    expect(COMPILER_PROMPT_V1_4).toContain("Counting down from ten now");
+    expect(COMPILER_PROMPT_V1_4).toContain("## ALPHA guidance (mandatory)");
+    expect(COMPILER_PROMPT_V1_4).toContain("At most one full countdown across alpha");
+    expect(COMPILER_PROMPT_V1_4).toContain("breath and body cues only");
   });
 });

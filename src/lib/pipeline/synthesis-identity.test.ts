@@ -1,6 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, afterEach } from "vitest";
 import {
   buildStoragePath,
+  defaultTtsModelIdForScript,
+  DEFAULT_CLONE_ELEVENLABS_MODEL_ID,
+  DEFAULT_ELEVENLABS_MODEL_ID,
   loadScriptSynthesisIdentity,
   resolveSynthesisIdentity,
 } from "./synthesis-identity";
@@ -110,5 +113,24 @@ describe("resolveSynthesisIdentity", () => {
         tts_model_id: "eleven_flash_v2_5",
       }),
     ).toThrow(/provider_voice_id/);
+  });
+});
+
+describe("defaultTtsModelIdForScript", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("defaults cloned-voice scripts to multilingual v2", () => {
+    expect(defaultTtsModelIdForScript("profile-uuid")).toBe(DEFAULT_CLONE_ELEVENLABS_MODEL_ID);
+  });
+
+  it("defaults stock-voice scripts to flash", () => {
+    expect(defaultTtsModelIdForScript(null)).toBe(DEFAULT_ELEVENLABS_MODEL_ID);
+  });
+
+  it("honors ELEVENLABS_CLONE_MODEL_ID override for clones", () => {
+    vi.stubEnv("ELEVENLABS_CLONE_MODEL_ID", "custom-clone-model");
+    expect(defaultTtsModelIdForScript("profile-uuid")).toBe("custom-clone-model");
   });
 });

@@ -21,6 +21,7 @@ export interface ScriptVoiceSource {
 }
 
 export const DEFAULT_ELEVENLABS_MODEL_ID = "eleven_flash_v2_5";
+export const DEFAULT_CLONE_ELEVENLABS_MODEL_ID = "eleven_multilingual_v2";
 
 export const DEFAULT_VOICE_SETTINGS: Record<string, unknown> = {
   stability: 0.5,
@@ -29,6 +30,13 @@ export const DEFAULT_VOICE_SETTINGS: Record<string, unknown> = {
 
 export function defaultTtsModelId(): string {
   return process.env.ELEVENLABS_MODEL_ID ?? DEFAULT_ELEVENLABS_MODEL_ID;
+}
+
+export function defaultTtsModelIdForScript(voiceProfileId: string | null): string {
+  if (voiceProfileId) {
+    return process.env.ELEVENLABS_CLONE_MODEL_ID ?? DEFAULT_CLONE_ELEVENLABS_MODEL_ID;
+  }
+  return defaultTtsModelId();
 }
 
 export function defaultTtsProvider(): TtsProviderId {

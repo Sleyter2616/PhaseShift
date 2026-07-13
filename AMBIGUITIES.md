@@ -142,6 +142,6 @@ Recorded ambiguities from `docs/blueprint.md` where the Phase 0 prompt or bluepr
 
 **Resolution (applied in Phase 4.5.0):** `buildCompilerInput()` persists **both** shapes on `scripts.compiler_input`:
 - `raw` — exact wizard strings (goal, localization, triangulation, not_list, features, sync_actions) for display and audit.
-- Top-level string fields — deterministic `normalizeSpeech()` output fed to the LLM (`compilerInputForModel()` omits `raw` from the user message).
+- Top-level string fields — deterministic `toSpeakableText()` output fed to the LLM (`compilerInputForModel()` omits `raw` from the user message).
 
-**Dedupe key uses compiled segment text only:** `content_hash` / `audio_files.dedupe_key` hash the **post-compile segment `text`** (plus voice/model/settings), never raw intake and never `compiler_input.raw`. Recompilation that changes wording breaks dedupe even when semantics match (see §1.2B D8). Verbatim QA against segment text should use the **normalized** compiler-input strings, not `goal_versions` raw columns.
+**Dedupe key uses compiled segment text only:** `content_hash` / `audio_files.dedupe_key` hash the **post-compile segment `text` after output `toSpeakableText()` normalization** (plus voice/model/settings), never raw intake and never `compiler_input.raw`. Normalization changes segment text and therefore content_hash — new speakable text correctly produces new audio. Recompilation that changes wording breaks dedupe even when semantics match (see §1.2B D8). Verbatim QA against segment text should use the **normalized** compiler-input strings, not `goal_versions` raw columns.

@@ -100,6 +100,7 @@ const TIME_SIMPLE_REGEX = /\b(\d{1,2})\s*(AM|PM)\b/gi;
 const SLASH_RATIO_REGEX = /\b\d+\/\d+\b/g;
 const UUID_REGEX =
   /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
+const URL_REGEX = /\bhttps?:\/\/[^\s<>"']+/gi;
 
 interface ProtectedSpan {
   token: string;
@@ -228,7 +229,7 @@ function timeToSpeech(hourText: string, minuteText: string | undefined, meridiem
 function protectPatterns(text: string): { text: string; protectedSpans: ProtectedSpan[] } {
   const protectedSpans: ProtectedSpan[] = [];
   let index = 0;
-  const patterns = [SLASH_RATIO_REGEX, UUID_REGEX];
+  const patterns = [URL_REGEX, SLASH_RATIO_REGEX, UUID_REGEX];
 
   let working = text;
   for (const pattern of patterns) {
@@ -276,7 +277,7 @@ function normalizeBareIntegers(text: string): string {
   });
 }
 
-export function normalizeSpeech(text: string): string {
+export function toSpeakableText(text: string): string {
   const { text: protectedText, protectedSpans } = protectPatterns(text);
   let normalized = protectedText;
   normalized = normalizeCurrency(normalized);
@@ -286,14 +287,17 @@ export function normalizeSpeech(text: string): string {
   return restoreProtected(normalized, protectedSpans);
 }
 
+/** @deprecated Use toSpeakableText */
+export const normalizeSpeech = toSpeakableText;
+
 export function normalizeTimeframeValue(timeframe: string): string {
   const preset = TIMEFRAME_PRESET_SPEECH[timeframe];
   if (preset) return preset;
   if (/^\d{4}-\d{2}-\d{2}$/.test(timeframe)) return isoDateToSpoken(timeframe);
-  return normalizeSpeech(timeframe);
+  return toSpeakableText(timeframe);
 }
 
 export function normalizeDeadlineValue(deadline: string): string {
   if (/^\d{4}-\d{2}-\d{2}$/.test(deadline)) return isoDateToSpoken(deadline);
-  return normalizeSpeech(deadline);
+  return toSpeakableText(deadline);
 }
