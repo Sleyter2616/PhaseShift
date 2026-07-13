@@ -1,5 +1,6 @@
 export const VOICE_SAMPLE_MAX_BYTES = 10 * 1024 * 1024;
-export const VOICE_SAMPLE_MIN_DURATION_SEC = 60;
+export const VOICE_SAMPLE_MIN_DURATION_SEC = 80;
+export const VOICE_SAMPLE_MAX_DURATION_SEC = 180;
 
 export function voiceSampleStoragePath(userId: string): string {
   return `${userId}/voice-sample.webm`;
@@ -21,6 +22,13 @@ export function validateVoiceSampleUpload(input: {
     input.durationSec < VOICE_SAMPLE_MIN_DURATION_SEC
   ) {
     return `recording too short (${input.durationSec}s); minimum ${VOICE_SAMPLE_MIN_DURATION_SEC}s`;
+  }
+  if (
+    input.durationSec != null &&
+    !Number.isNaN(input.durationSec) &&
+    input.durationSec > VOICE_SAMPLE_MAX_DURATION_SEC
+  ) {
+    return `recording too long (${input.durationSec}s); maximum ${VOICE_SAMPLE_MAX_DURATION_SEC}s`;
   }
   return null;
 }

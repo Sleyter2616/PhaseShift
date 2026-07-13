@@ -1,3 +1,6 @@
+/** ~40-word clone fidelity matrix excerpt (no SSML). */
+export const TTS_MATRIX_EXCERPT = `You settle into the chair and let your shoulders drop. Your breath moves in through the nose and out through the mouth, slow and even. You listen to your own voice guide you inward, calm, alert, and fully present in this quiet room now.`;
+
 /** ~75s S1 bake-off excerpt: calm second-person induction with two canonical breaks. */
 export const TTS_SAMPLE_EXCERPT = `You settle into the chair and let your shoulders drop.
 Your breath moves in through the nose and out through the mouth, slow and even.

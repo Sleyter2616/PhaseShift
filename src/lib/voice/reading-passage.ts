@@ -18,3 +18,5 @@ Thank you for completing your voice sample recording now.`;
 
 export const VOICE_SAMPLE_TARGET_SEC = 90;
 export const VOICE_SAMPLE_MIN_SEC = 80;
+/** Hard stop for in-app recording (up to 3 minutes). */
+export const VOICE_SAMPLE_MAX_SEC = 180;
