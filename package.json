@@ -21,6 +21,7 @@
     "re:reconcile": "tsx scripts/re-reconcile.ts",
     "retry:synthesis": "tsx scripts/retry-synthesis.ts",
     "compile:once": "tsx scripts/compile-once.ts",
+    "script:dump": "tsx scripts/script-dump.ts",
     "tts:sample": "tsx scripts/tts-sample.ts"
   },
   "dependencies": {

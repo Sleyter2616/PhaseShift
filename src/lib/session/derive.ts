@@ -1,5 +1,6 @@
 import type { Intake } from "../contracts/intake";
 import { PACING_WPM, PHASE_BUDGET_SEC, type DurationPreset } from "../costs";
+import { deadlineToSpeech, timeframeToSpeech } from "./date-speech";
 
 export const DEFAULT_ENTRAINMENT_PLAN = [
   { phase: "beta" as const, hz: 18, glide_to: 10, glide_sec: 45 },
@@ -61,12 +62,18 @@ export function buildCompilerInput(intake: Intake, goalVersionId: string): Compi
   return {
     goal_version_id: goalVersionId,
     goal_statement: intake.goal_statement,
-    localization: intake.localization,
+    localization: {
+      timeframe: timeframeToSpeech(intake.localization.timeframe),
+      place: intake.localization.place,
+    },
     triangulation: intake.triangulation,
     not_list: intake.not_list,
     wrong_direction_pulls: intake.wrong_pulls,
     features: intake.features,
-    sync_actions: intake.sync_actions,
+    sync_actions: intake.sync_actions.map((action) => ({
+      action: action.action,
+      ...(action.deadline ? { deadline: deadlineToSpeech(action.deadline) } : {}),
+    })),
     senses_emphasis: intake.session.senses_emphasis,
     ...(intake.session.aos_layer ? { aos_layer: intake.session.aos_layer } : {}),
     session,

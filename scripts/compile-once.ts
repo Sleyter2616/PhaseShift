@@ -1,34 +1,43 @@
-import { readFileSync, existsSync } from "node:fs";
-import { resolve } from "node:path";
 import { CompilerError, compileManifest } from "../src/lib/compiler/compile";
 import { stripBreaks } from "../src/lib/tts/breaks";
 import { PHASES } from "../src/lib/schedule/reconcile";
 import { intake40Min } from "../src/lib/fixtures/intake";
 import { buildCompilerInput } from "../src/lib/session/derive";
+import { formatScriptDump, type DumpSegment } from "../src/lib/review/script-dump";
+import { loadEnvLocal } from "./load-env";
 
 const GOAL_VERSION_ID = "550e8400-e29b-41d4-a716-446655440000";
-
-function loadEnvLocal(): void {
-  const envPath = resolve(process.cwd(), ".env.local");
-  if (!existsSync(envPath)) return;
-  for (const line of readFileSync(envPath, "utf8").split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const eq = trimmed.indexOf("=");
-    if (eq === -1) continue;
-    const key = trimmed.slice(0, eq).trim();
-    const value = trimmed.slice(eq + 1).trim();
-    if (!(key in process.env)) process.env[key] = value;
-  }
-}
 
 function countWords(text: string): number {
   const { cleanText } = stripBreaks(text);
   return cleanText.trim().split(/\s+/).filter(Boolean).length;
 }
 
+function manifestSegmentsToDump(segments: {
+  seq: number;
+  phase: string;
+  step: number | null;
+  title?: string;
+  pacing_wpm: number;
+  target_duration_sec: number;
+  pause_after_ms: number;
+  text: string;
+}[]): DumpSegment[] {
+  return segments.map((segment) => ({
+    seq: segment.seq,
+    phase: segment.phase,
+    step: segment.step,
+    title: segment.title ?? null,
+    pacing_wpm: segment.pacing_wpm,
+    target_duration_sec: segment.target_duration_sec,
+    pause_after_ms: segment.pause_after_ms,
+    text: segment.text,
+  }));
+}
+
 async function main() {
   loadEnvLocal();
+  const fullDump = process.argv.includes("--full");
 
   const input = buildCompilerInput(intake40Min, GOAL_VERSION_ID);
 
@@ -50,6 +59,12 @@ async function main() {
         }
       },
     });
+
+    if (fullDump) {
+      console.log(formatScriptDump(manifestSegmentsToDump(manifest.segments)));
+      process.exit(0);
+    }
+
     const phaseBudget = input.session.phase_budget_sec;
 
     console.log(`segments: ${manifest.segments.length}`);

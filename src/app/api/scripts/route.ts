@@ -2,7 +2,7 @@ import { z } from "zod";
 import { NextResponse } from "next/server";
 import { isInsufficientCreditsError } from "@/lib/auth/session";
 import { createScriptBodySchema } from "@/lib/contracts/intake";
-import { PROMPT_VERSION } from "@/lib/compiler/prompt.v1.3";
+import { PROMPT_VERSION } from "@/lib/compiler/prompt.v1.4";
 import { GENERATION_COST_CREDITS } from "@/lib/costs";
 import { getServiceClient } from "@/lib/db/service-client";
 import { inngest } from "@/inngest/client";

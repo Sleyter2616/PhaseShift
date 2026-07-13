@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { PHASE_BUDGET_SEC } from "../costs";
-import { deriveSessionFromIntake, DEFAULT_ENTRAINMENT_PLAN } from "./derive";
+import { deriveSessionFromIntake, buildCompilerInput, DEFAULT_ENTRAINMENT_PLAN } from "./derive";
 import { intake20Min, intake40Min } from "../fixtures/intake";
 import type { Intake } from "../contracts/intake";
 
@@ -29,5 +29,13 @@ describe("deriveSessionFromIntake", () => {
     const session = deriveSessionFromIntake(intake20Min);
     expect(session.duration_min).toBe(20);
     expect(session.phase_budget_sec.theta).toBe(780);
+  });
+});
+
+describe("buildCompilerInput", () => {
+  it("converts timeframe and sync_action deadlines to natural speech before compile", () => {
+    const input = buildCompilerInput(intake40Min, "550e8400-e29b-41d4-a716-446655440000");
+    expect(input.localization.timeframe).toBe("ninety days");
+    expect(input.sync_actions[1]?.deadline).toBe("July 14");
   });
 });
