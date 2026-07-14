@@ -17,6 +17,7 @@ import {
   upcomingSegmentSeqs,
   voicesDueInWindow,
 } from "@/lib/audio/scheduler";
+import { Mark } from "@/components/mark";
 import { isTestGenerationProvider } from "@/lib/synthesis/provenance";
 import { completeSession, createSession } from "./actions";
 
@@ -49,6 +50,20 @@ interface DebugSnapshot {
 }
 
 const IS_DEV = process.env.NODE_ENV !== "production";
+
+const PHASE_JOURNEY = ["beta", "alpha", "theta", "gamma"] as const;
+
+function phaseBeatHz(
+  phase: string | null,
+  manifest: PlaybackManifest,
+  fallbackHz: number,
+): number {
+  if (!phase) return fallbackHz;
+  const fromPlan = manifest.meta.entrainment_plan.find((item) => item.phase === phase)?.hz;
+  if (fromPlan != null) return fromPlan;
+  const fromSegment = manifest.segments.find((segment) => segment.phase === phase)?.entrainment_hz;
+  return fromSegment ?? fallbackHz;
+}
 
 const EMPTY_DEBUG: DebugSnapshot = {
   ctxState: "none",
@@ -110,7 +125,7 @@ function AudioDebugStrip({
   const ctxTimeLabel = debug.ctxTime != null ? debug.ctxTime.toFixed(1) : "—";
 
   return (
-    <div className="fixed inset-x-0 bottom-0 z-50 border-t border-amber-300 bg-amber-50 px-3 py-2 font-mono text-[11px] leading-relaxed text-neutral-800">
+    <div className="fixed inset-x-0 bottom-0 z-50 border-t border-amber-300/40 bg-[#1a1528]/95 px-3 py-2 font-mono text-[11px] leading-relaxed text-[var(--text-hi)] backdrop-blur">
       <div className="mx-auto flex max-w-xl flex-wrap items-center gap-x-3 gap-y-1">
         <span>ctx.state={debug.ctxState}</span>
         <span>ctx.t={ctxTimeLabel}</span>
@@ -129,7 +144,7 @@ function AudioDebugStrip({
           type="button"
           disabled={!engineReady}
           onClick={onTestTone}
-          className="rounded border border-neutral-400 px-2 py-0.5 disabled:opacity-40"
+          className="session-control px-2 py-0.5 text-[11px] disabled:opacity-40"
         >
           Test tone
         </button>
@@ -652,6 +667,8 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
 
   const engineReady = stage === "playing" || stage === "paused";
   const displayElapsedSec = scrubSec ?? elapsedSec;
+  const pulseHz = phaseBeatHz(currentPhase, manifest, initialBeatHz);
+  const pulsePeriodSec = Math.max(0.25, 1 / pulseHz);
 
   const debugStrip = (
     <AudioDebugStrip
@@ -665,36 +682,43 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
 
   if (stage === "prebegin") {
     return (
-      <main className="mx-auto max-w-xl space-y-6 p-6">
-        <h1 className="text-2xl font-semibold">Before you begin</h1>
-        <ul className="list-disc space-y-3 pl-5 text-sm leading-relaxed text-neutral-700">
-          <li>
-            Entrainment tones use rhythmic frequencies that may affect people with a history of
-            seizures or photosensitive epilepsy. Do not use this session if you have that history.
-          </li>
-          <li>Do not use PhaseShift while driving or operating machinery.</li>
-          <li>
-            PhaseShift is not a medical device and is not a substitute for professional medical or
-            mental health care.
-          </li>
-          <li>
-            Keep your screen on and leave this app in the foreground. v0 playback requires the
-            session screen to stay visible.
-          </li>
-        </ul>
-        {isTestGeneration ? (
-          <p className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-            This is a test generation — it contains no synthesized speech.
-          </p>
-        ) : null}
-        {error ? <p className="text-sm text-red-700">{error}</p> : null}
-        <button
-          type="button"
-          onClick={() => void startPlayback()}
-          className="rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-white"
-        >
-          Begin session
-        </button>
+      <main className="session-surface flex min-h-dvh flex-col justify-center px-4 py-10">
+        <div className="mx-auto w-full max-w-xl space-y-8">
+          <div className="space-y-3">
+            <Mark size={32} className="text-[var(--session-text)]" />
+            <h1 className="font-display text-3xl tracking-tight text-[var(--session-text)]">
+              Before you begin
+            </h1>
+          </div>
+          <ul className="space-y-4 text-sm leading-relaxed text-[var(--session-mid)]">
+            <li>
+              Entrainment tones use rhythmic frequencies that may affect people with a history of
+              seizures or photosensitive epilepsy. Do not use this session if you have that history.
+            </li>
+            <li>Do not use PhaseShift while driving or operating machinery.</li>
+            <li>
+              PhaseShift is not a medical device and is not a substitute for professional medical or
+              mental health care.
+            </li>
+            <li>
+              Keep your screen on and leave this app in the foreground. v0 playback requires the
+              session screen to stay visible.
+            </li>
+          </ul>
+          {isTestGeneration ? (
+            <p className="session-panel px-3 py-2 text-sm text-[var(--accent-sand)]">
+              This is a test generation — it contains no synthesized speech.
+            </p>
+          ) : null}
+          {error ? <p className="text-sm text-[#f0b4b4]">{error}</p> : null}
+          <button
+            type="button"
+            onClick={() => void startPlayback()}
+            className="session-control session-btn-accent w-full"
+          >
+            Begin session
+          </button>
+        </div>
       </main>
     );
   }
@@ -705,13 +729,24 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
         ? Math.round((fetchProgress.loaded / fetchProgress.total) * 100)
         : 0;
     return (
-      <main className="mx-auto max-w-xl space-y-4 p-6">
-        <h1 className="text-xl font-semibold">Preparing audio</h1>
-        <p className="text-sm text-neutral-600">
-          Downloading segments {fetchProgress.loaded}/{fetchProgress.total} ({pct}%)
-        </p>
-        <div className="h-2 w-full rounded bg-neutral-200">
-          <div className="h-2 rounded bg-neutral-800" style={{ width: `${pct}%` }} />
+      <main className="session-surface flex min-h-dvh flex-col items-center justify-center px-4 py-10">
+        <div className="mx-auto w-full max-w-sm space-y-6 text-center">
+          <div className="session-pulse mx-auto" style={{ ["--pulse-period" as string]: "1.2s" }}>
+            <div className="session-pulse__glow" />
+            <div className="session-pulse__core">
+              <Mark size={36} className="text-[var(--session-text)]" />
+            </div>
+          </div>
+          <h1 className="font-display text-2xl text-[var(--session-text)]">Preparing audio</h1>
+          <p className="text-sm text-[var(--session-mid)]">
+            Downloading segments {fetchProgress.loaded}/{fetchProgress.total} ({pct}%)
+          </p>
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--border-hair)]">
+            <div
+              className="h-full rounded-full bg-[var(--session-accent)]"
+              style={{ width: `${pct}%` }}
+            />
+          </div>
         </div>
       </main>
     );
@@ -720,20 +755,27 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
   if (stage === "readyToPlay") {
     return (
       <>
-        <main className={`mx-auto max-w-xl space-y-6 p-6 ${debugPad ? "pb-20" : ""}`}>
-          <h1 className="text-xl font-semibold">Ready to play</h1>
-          <p className="text-sm text-neutral-600">
-            Segments downloaded. Tap below to start audio — your browser requires a direct tap to
-            unlock sound.
-          </p>
-          {error ? <p className="text-sm text-red-700">{error}</p> : null}
-          <button
-            type="button"
-            onClick={() => void startAudio()}
-            className="w-full rounded bg-neutral-900 px-6 py-4 text-lg font-medium text-white"
-          >
-            Start audio
-          </button>
+        <main
+          className={`session-surface flex min-h-dvh flex-col justify-center px-4 py-10 ${debugPad ? "pb-24" : ""}`}
+        >
+          <div className="mx-auto w-full max-w-xl space-y-6">
+            <Mark size={32} className="text-[var(--session-text)]" />
+            <h1 className="font-display text-3xl tracking-tight text-[var(--session-text)]">
+              Ready to play
+            </h1>
+            <p className="text-sm leading-relaxed text-[var(--session-mid)]">
+              Segments downloaded. Tap below to start audio — your browser requires a direct tap to
+              unlock sound.
+            </p>
+            {error ? <p className="text-sm text-[#f0b4b4]">{error}</p> : null}
+            <button
+              type="button"
+              onClick={() => void startAudio()}
+              className="session-control session-btn-accent w-full py-4 text-base"
+            >
+              Start audio
+            </button>
+          </div>
         </main>
         {debugStrip}
       </>
@@ -742,164 +784,226 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
 
   if (stage === "rating") {
     return (
-      <main className="mx-auto max-w-xl space-y-6 p-6">
-        <h1 className="text-xl font-semibold">How alert do you feel?</h1>
-        <p className="text-sm text-neutral-600">Rate your alertness from 1 (very drowsy) to 5 (fully alert).</p>
-        <div className="flex gap-2">
-          {[1, 2, 3, 4, 5].map((value) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => setExitAlertness(value)}
-              className={`h-10 w-10 rounded border text-sm ${
-                exitAlertness === value
-                  ? "border-neutral-900 bg-neutral-900 text-white"
-                  : "border-neutral-300"
-              }`}
-            >
-              {value}
-            </button>
-          ))}
+      <main className="session-surface flex min-h-dvh flex-col justify-center px-4 py-10">
+        <div className="mx-auto w-full max-w-xl space-y-6">
+          <h1 className="font-display text-3xl tracking-tight text-[var(--session-text)]">
+            How alert do you feel?
+          </h1>
+          <p className="text-sm text-[var(--session-mid)]">
+            Rate your alertness from 1 (very drowsy) to 5 (fully alert).
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {[1, 2, 3, 4, 5].map((value) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setExitAlertness(value)}
+                className="session-control h-12 w-12 opacity-100"
+                style={
+                  exitAlertness === value
+                    ? {
+                        borderColor: "var(--session-accent)",
+                        color: "var(--session-text)",
+                        background:
+                          "color-mix(in srgb, var(--session-accent) 22%, transparent)",
+                      }
+                    : undefined
+                }
+                aria-label={`Alertness ${value}`}
+                aria-pressed={exitAlertness === value}
+              >
+                {value}
+              </button>
+            ))}
+          </div>
+          {error ? <p className="text-sm text-[#f0b4b4]">{error}</p> : null}
+          <button
+            type="button"
+            onClick={() => void submitRating()}
+            className="session-control session-btn-accent"
+          >
+            Save and finish
+          </button>
         </div>
-        {error ? <p className="text-sm text-red-700">{error}</p> : null}
-        <button
-          type="button"
-          onClick={() => void submitRating()}
-          className="rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-white"
-        >
-          Save and finish
-        </button>
       </main>
     );
   }
 
   if (stage === "done") {
     return (
-      <main className="mx-auto max-w-xl space-y-4 p-6">
-        <h1 className="text-xl font-semibold">Session complete</h1>
-        <p className="text-sm text-neutral-600">Your exit alertness rating was saved.</p>
+      <main className="session-surface flex min-h-dvh flex-col justify-center px-4 py-10">
+        <div className="mx-auto w-full max-w-xl space-y-4">
+          <Mark size={32} className="text-[var(--session-text)]" />
+          <h1 className="font-display text-3xl tracking-tight text-[var(--session-text)]">
+            Session complete
+          </h1>
+          <p className="text-sm text-[var(--session-mid)]">Your exit alertness rating was saved.</p>
+        </div>
       </main>
     );
   }
 
   return (
     <>
-      <main className={`mx-auto max-w-xl space-y-6 p-6 ${debugPad ? "pb-20" : ""}`}>
-        <header className="space-y-1">
-          <p className="text-xs uppercase tracking-wide text-neutral-500">Current phase</p>
-          <p className="text-2xl font-semibold capitalize">{currentPhase ?? "—"}</p>
-          <p className="text-sm text-neutral-600">
-            {formatTime(displayElapsedSec)} / {formatTime(totalSec)}
-          </p>
-        </header>
-
-        <div className="space-y-3">
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              aria-label="Back 15 seconds"
-              onClick={() => handleSeekRelative(-15)}
-              className="rounded border border-neutral-300 px-3 py-1.5 text-sm font-medium"
+      <main
+        className={`session-surface flex min-h-dvh flex-col px-4 py-6 sm:px-6 ${debugPad ? "pb-24" : "pb-8"}`}
+      >
+        <div className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-8">
+          <header className="space-y-3 pt-2 text-center">
+            <nav
+              className="flex items-center justify-center gap-2"
+              aria-label="Phase journey"
             >
-              |&lt;-15s
-            </button>
-            <input
-              type="range"
-              min={0}
-              max={totalSec}
-              step={0.1}
-              value={displayElapsedSec}
-              onPointerDown={handleScrubStart}
-              onChange={(event) => handleScrubChange(Number(event.target.value))}
-              onPointerUp={(event) => void handleScrubEnd(Number(event.currentTarget.value))}
-              className="w-full"
-              aria-label="Session scrub bar"
-            />
-            <button
-              type="button"
-              aria-label="Forward 15 seconds"
-              onClick={() => handleSeekRelative(15)}
-              className="rounded border border-neutral-300 px-3 py-1.5 text-sm font-medium"
-            >
-              +15s-&gt;|
-            </button>
-          </div>
-          {showForwardSeekHint ? (
-            <p className="text-xs text-neutral-500">
-              Skipping ahead may reduce the induction effect.
+              {PHASE_JOURNEY.map((phase) => {
+                const active = currentPhase === phase;
+                return (
+                  <span
+                    key={phase}
+                    className="rounded-full px-2.5 py-1 text-xs font-medium capitalize"
+                    style={{
+                      color: active ? "var(--session-accent)" : "var(--session-mid)",
+                      opacity: active ? 1 : 0.55,
+                    }}
+                    aria-current={active ? "true" : undefined}
+                  >
+                    {phase}
+                  </span>
+                );
+              })}
+            </nav>
+            <h1 className="font-display text-4xl capitalize tracking-tight text-[var(--session-text)]">
+              {currentPhase ?? "—"}
+            </h1>
+            <p className="font-body text-sm text-[var(--session-mid)]">
+              {formatTime(displayElapsedSec)} / {formatTime(totalSec)}
             </p>
-          ) : null}
-        </div>
+          </header>
 
-        <div className="space-y-4 rounded border border-neutral-200 p-4">
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => void togglePause()}
-              className="rounded border border-neutral-300 px-3 py-1.5 text-sm"
-            >
-              {stage === "paused" ? "Resume" : "Pause"}
-            </button>
-            <button
-              type="button"
-              onClick={() => void handleEnd()}
-              className="rounded border border-neutral-300 px-3 py-1.5 text-sm"
-            >
-              End session
-            </button>
+          <div
+            className="session-pulse"
+            style={{ ["--pulse-period" as string]: `${pulsePeriodSec}s` }}
+            aria-hidden="true"
+          >
+            <div className="session-pulse__glow" />
+            <div className="session-pulse__core">
+              <Mark size={40} className="text-[var(--session-text)]" />
+            </div>
           </div>
 
-          <label className="block text-sm">
-            Voice volume
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.01}
-              value={voiceGain}
-              onChange={(event) => handleVoiceGain(Number(event.target.value))}
-              className="mt-1 w-full"
-            />
-          </label>
-
-          <label className="block text-sm">
-            Tone volume
-            <input
-              type="range"
-              min={0}
-              max={0.5}
-              step={0.01}
-              value={toneGain}
-              onChange={(event) => handleToneGain(Number(event.target.value))}
-              className="mt-1 w-full"
-            />
-          </label>
-
-          <fieldset className="space-y-2 text-sm">
-            <legend className="font-medium">Entrainment mode</legend>
-            <label className="flex items-center gap-2">
+          <div className="mt-auto space-y-4">
+            <div className="flex items-center gap-2 sm:gap-3">
+              <button
+                type="button"
+                aria-label="Back 15 seconds"
+                onClick={() => handleSeekRelative(-15)}
+                className="session-control shrink-0"
+              >
+                −15s
+              </button>
               <input
-                type="radio"
-                name="mode"
-                checked={mode === "isochronic"}
-                onChange={() => handleModeChange("isochronic")}
+                type="range"
+                min={0}
+                max={totalSec}
+                step={0.1}
+                value={displayElapsedSec}
+                onPointerDown={handleScrubStart}
+                onChange={(event) => handleScrubChange(Number(event.target.value))}
+                onPointerUp={(event) => void handleScrubEnd(Number(event.currentTarget.value))}
+                className="session-scrub min-h-11 w-full"
+                aria-label="Session scrub bar"
               />
-              Isochronic (speakers OK)
-            </label>
-            <label className="flex items-center gap-2">
-              <input
-                type="radio"
-                name="mode"
-                checked={mode === "binaural"}
-                onChange={() => handleModeChange("binaural")}
-              />
-              Binaural (requires headphones)
-            </label>
-          </fieldset>
+              <button
+                type="button"
+                aria-label="Forward 15 seconds"
+                onClick={() => handleSeekRelative(15)}
+                className="session-control shrink-0"
+              >
+                +15s
+              </button>
+            </div>
+            {showForwardSeekHint ? (
+              <p className="text-center text-xs text-[var(--session-mid)]">
+                Skipping ahead may reduce the induction effect.
+              </p>
+            ) : null}
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => void togglePause()}
+                className="session-control min-h-12 flex-1 opacity-100"
+                aria-label={stage === "paused" ? "Resume" : "Pause"}
+              >
+                {stage === "paused" ? "Resume" : "Pause"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleEnd()}
+                className="session-control min-h-12"
+                aria-label="End session"
+              >
+                End
+              </button>
+            </div>
+
+            <div className="session-panel space-y-4 p-4">
+              <label className="block text-sm text-[var(--session-mid)]">
+                Voice volume
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={voiceGain}
+                  onChange={(event) => handleVoiceGain(Number(event.target.value))}
+                  className="session-scrub mt-2 w-full"
+                  aria-label="Voice volume"
+                />
+              </label>
+
+              <label className="block text-sm text-[var(--session-mid)]">
+                Tone volume
+                <input
+                  type="range"
+                  min={0}
+                  max={0.5}
+                  step={0.01}
+                  value={toneGain}
+                  onChange={(event) => handleToneGain(Number(event.target.value))}
+                  className="session-scrub mt-2 w-full"
+                  aria-label="Tone volume"
+                />
+              </label>
+
+              <fieldset className="space-y-2 text-sm text-[var(--session-mid)]">
+                <legend className="font-medium text-[var(--session-text)]">Entrainment mode</legend>
+                <label className="flex min-h-11 items-center gap-2">
+                  <input
+                    type="radio"
+                    name="mode"
+                    checked={mode === "isochronic"}
+                    onChange={() => handleModeChange("isochronic")}
+                  />
+                  Isochronic (speakers OK)
+                </label>
+                <label className="flex min-h-11 items-center gap-2">
+                  <input
+                    type="radio"
+                    name="mode"
+                    checked={mode === "binaural"}
+                    onChange={() => handleModeChange("binaural")}
+                  />
+                  Binaural (requires headphones)
+                </label>
+              </fieldset>
+            </div>
+
+            {error ? <p className="text-sm text-[#f0b4b4]">{error}</p> : null}
+            <p className="text-center text-xs text-[var(--session-mid)]">
+              Keep this screen visible for uninterrupted playback.
+            </p>
+          </div>
         </div>
-
-        {error ? <p className="text-sm text-red-700">{error}</p> : null}
-        <p className="text-xs text-neutral-500">Keep this screen visible for uninterrupted playback.</p>
       </main>
       {debugStrip}
     </>

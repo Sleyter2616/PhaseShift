@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { AuthHeader } from "@/components/auth-header";
+import { SetupHeader } from "@/components/setup-header";
 import { getSessionUser } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { DevGoldenScriptButton } from "./dev-golden-script-button";
@@ -25,21 +25,26 @@ export default async function ScriptsPage() {
 
   if (error) {
     return (
-      <>
-        <AuthHeader />
-        <main className="mx-auto max-w-3xl p-6">
-          <p className="text-sm text-red-700">Failed to load scripts: {error.message}</p>
+      <div className="setup-surface">
+        <SetupHeader />
+        <main className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+          <p className="text-sm text-[#f0b4b4]">Failed to load scripts: {error.message}</p>
         </main>
-      </>
+      </div>
     );
   }
 
   return (
-    <>
-      <AuthHeader />
-      <main className="mx-auto max-w-3xl space-y-6 p-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <h1 className="text-2xl font-semibold">Your scripts</h1>
+    <div className="setup-surface">
+      <SetupHeader />
+      <main className="mx-auto max-w-3xl space-y-8 px-4 py-8 sm:px-6 sm:py-10">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div className="space-y-1">
+            <p className="setup-eyebrow">Home</p>
+            <h1 className="font-display text-3xl tracking-tight text-[var(--text-hi)] sm:text-4xl">
+              Your sessions
+            </h1>
+          </div>
           <div className="flex flex-col gap-2 sm:items-end">
             <NewScriptButton />
             {process.env.NODE_ENV === "development" ? <DevGoldenScriptButton /> : null}
@@ -47,17 +52,22 @@ export default async function ScriptsPage() {
         </div>
 
         {scripts && scripts.length > 0 ? (
-          <ul className="divide-y divide-neutral-200 rounded border border-neutral-200">
+          <ul className="border-y border-[var(--setup-border)]">
             {scripts.map((script) => (
-              <li key={script.id} className="flex items-center justify-between gap-4 px-4 py-3">
-                <div className="min-w-0">
+              <li
+                key={script.id}
+                className="flex items-center justify-between gap-3 border-b border-[var(--setup-border)] py-4 last:border-b-0"
+              >
+                <div className="min-w-0 space-y-1.5">
                   <div className="flex flex-wrap items-center gap-2">
-                    <p className="truncate font-mono text-sm">{script.id}</p>
-                    <span className="shrink-0 rounded-full border border-neutral-300 bg-neutral-50 px-2 py-0.5 text-xs text-neutral-700">
+                    <p className="truncate font-mono text-sm text-[var(--text-hi)]">
+                      {script.id}
+                    </p>
+                    <span className="setup-chip px-2 py-0.5 text-xs text-[var(--text-mid)]">
                       {synthesisProvenanceBadge(script)}
                     </span>
                   </div>
-                  <p className="text-xs text-neutral-500">
+                  <p className="text-xs text-[var(--text-mid)]">
                     {script.status}
                     {script.total_duration_sec != null
                       ? ` · ${Math.round(script.total_duration_sec / 60)} min`
@@ -66,18 +76,18 @@ export default async function ScriptsPage() {
                     {formatDate(script.created_at)}
                   </p>
                 </div>
-                <div className="flex shrink-0 gap-2 text-sm">
+                <div className="flex shrink-0">
                   {script.status === "ready" ? (
                     <Link
                       href={`/session/${script.id}`}
-                      className="rounded bg-neutral-900 px-3 py-1.5 text-white"
+                      className="setup-btn-primary px-3 py-1.5 text-sm"
                     >
                       Play
                     </Link>
                   ) : (
                     <Link
                       href={`/dev/scripts/${script.id}`}
-                      className="rounded border border-neutral-300 px-3 py-1.5"
+                      className="setup-btn-ghost px-3 py-1.5 text-sm"
                     >
                       Status
                     </Link>
@@ -87,15 +97,18 @@ export default async function ScriptsPage() {
             ))}
           </ul>
         ) : (
-          <p className="text-sm text-neutral-600">
-            No scripts yet.{" "}
-            <Link href="/wizard" className="underline">
+          <p className="setup-note">
+            No sessions yet.{" "}
+            <Link
+              href="/wizard"
+              className="text-[var(--accent-sand)] underline-offset-2 hover:underline"
+            >
               Start the intake wizard
             </Link>{" "}
             to generate your first 40-minute script.
           </p>
         )}
       </main>
-    </>
+    </div>
   );
 }

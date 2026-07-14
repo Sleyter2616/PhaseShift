@@ -43,12 +43,10 @@ export function ChipInput({
               key={`${value}-${index}`}
               type="button"
               onClick={() => removeChip(index)}
-              className={`rounded-full border px-3 py-1 text-sm ${
-                error
-                  ? "border-red-500 text-red-800"
-                  : "border-neutral-300 bg-neutral-50 text-neutral-800"
-              }`}
+              className="setup-chip focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
+              data-error={error ? "true" : "false"}
               title={error ?? "Click to remove"}
+              aria-label={error ? `${value}. ${error}. Click to remove` : `Remove ${value}`}
             >
               {value}
               {error ? ` — ${error}` : " ×"}
@@ -68,10 +66,10 @@ export function ChipInput({
             addChip();
           }
         }}
-        className="w-full rounded border border-neutral-300 px-3 py-2 text-sm"
+        className="setup-input"
       />
       {minItems != null || maxItems != null ? (
-        <p className="text-xs text-neutral-500">
+        <p className="text-xs text-[var(--text-lo)]">
           {values.length} item{values.length === 1 ? "" : "s"}
           {minItems != null ? ` (min ${minItems}` : ""}
           {maxItems != null ? `${minItems != null ? ", " : " ("}max ${maxItems}` : ""}

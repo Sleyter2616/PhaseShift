@@ -60,20 +60,25 @@ export function DevGoldenScriptButton() {
         type="button"
         disabled={pending}
         onClick={() => void handleClick()}
-        className="rounded border border-neutral-300 px-4 py-2 text-sm disabled:opacity-50"
+        className="setup-btn-ghost text-xs disabled:opacity-50"
       >
         {pending ? "Starting…" : "Dev: golden intake (40 min)"}
       </button>
       {insufficientCredits ? (
-        <p className="text-sm text-amber-700">Insufficient credits</p>
+        <p className="text-sm text-[var(--accent-sand)]">Insufficient credits</p>
       ) : null}
-      {error ? <p className="text-sm text-red-700">{error}</p> : null}
+      {error ? <p className="text-sm text-[#f0b4b4]">{error}</p> : null}
       {newScriptId ? (
-        <p className="text-sm text-neutral-700">
+        <p className="text-sm text-[var(--text-mid)]">
           Started script{" "}
-          <code className="rounded bg-neutral-100 px-1 font-mono text-xs">{newScriptId}</code>{" "}
+          <code className="rounded border border-[var(--setup-border)] px-1 font-mono text-xs text-[var(--text-hi)]">
+            {newScriptId}
+          </code>{" "}
           —{" "}
-          <Link href={`/dev/scripts/${newScriptId}`} className="underline">
+          <Link
+            href={`/dev/scripts/${newScriptId}`}
+            className="text-[var(--accent-sand)] underline-offset-2 hover:underline"
+          >
             view status
           </Link>
         </p>
