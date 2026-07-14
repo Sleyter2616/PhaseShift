@@ -89,7 +89,7 @@ curl -s -X POST http://localhost:3000/api/scripts \
   -d "$(pnpm tsx -e "import { intake40Min } from './src/lib/fixtures/intake.ts'; process.stdout.write(JSON.stringify(intake40Min))")"
 ```
 
-With `TTS_PROVIDER=selfhost`, generation enqueues without ElevenLabs API spend. Each generation spends `GENERATION_COST_CREDITS` (1) via `spend_credits` RPC.
+With `TTS_PROVIDER=selfhost`, generation enqueues without ElevenLabs API spend. Credit cost depends on the TTS model: Flash stock voice = 1 credit; clone / multilingual v2 = 2 credits (`creditsPerGeneration` in `src/lib/billing/plans.ts`).
 
 Expect `202` with `{ "script_id": "..." }`, or `402` with `{ "error": "insufficient_credits" }`.
 
@@ -112,6 +112,22 @@ pnpm credits:concurrency
 ```
 
 Both print `PASS`/`FAIL` lines and clean up throwaway users.
+
+### Billing (after `0009_billing` applied)
+
+Create Products and Prices in the [Stripe Dashboard](https://dashboard.stripe.com/test/products) (test mode), then paste Price IDs into `.env.local`:
+
+- `STRIPE_PRICE_TOPUP` — one-time $6 top-up (1 credit)
+- `STRIPE_PRICE_GUIDED` — Guided $29/mo subscription
+- `STRIPE_PRICE_PRACT` — Practitioner $49/mo subscription
+- `STRIPE_WEBHOOK_SECRET` — from `stripe listen --forward-to localhost:3000/api/webhooks/stripe`
+- `NEXT_PUBLIC_APP_URL` — e.g. `http://localhost:3000`
+
+Signed-in users manage balance at `/billing`. Webhook fulfillment is idempotent via `stripe_events` (D26).
+
+```bash
+pnpm billing:sim   # requires dev server + test Stripe keys; prints PASS/FAIL
+```
 
 ### 10. Session playback
 

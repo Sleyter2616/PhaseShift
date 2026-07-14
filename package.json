@@ -23,7 +23,8 @@
     "compile:once": "tsx scripts/compile-once.ts",
     "script:dump": "tsx scripts/script-dump.ts",
     "tts:sample": "tsx scripts/tts-sample.ts",
-    "tts:matrix": "tsx scripts/tts-matrix.ts"
+    "tts:matrix": "tsx scripts/tts-matrix.ts",
+    "billing:sim": "tsx scripts/billing-sim.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
@@ -33,6 +34,7 @@
     "next": "^15.3.3",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "stripe": "^18.3.0",
     "zod": "^3.25.67"
   },
   "devDependencies": {

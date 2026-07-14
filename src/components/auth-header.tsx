@@ -19,6 +19,9 @@ export async function AuthHeader() {
           <Link href="/voice" className="text-neutral-600 hover:text-neutral-900">
             Voice
           </Link>
+          <Link href="/billing" className="text-neutral-600 hover:text-neutral-900">
+            Billing
+          </Link>
           <span className="text-neutral-500">{user.email}</span>
         </nav>
         <form action={signOut}>
