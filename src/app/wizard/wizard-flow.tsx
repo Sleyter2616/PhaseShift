@@ -148,18 +148,19 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">New script</h1>
-        <p className="text-sm text-neutral-500">
-          Step {step} of {STEP_COUNT}
+    <div className="space-y-8">
+      <header className="space-y-3">
+        <p className="step-eyebrow">
+          Step {String(step).padStart(2, "0")} / {String(STEP_COUNT).padStart(2, "0")}
         </p>
-      </div>
+        <h1 className="font-display text-2xl font-normal text-[var(--text-hi)]">
+          {WIZARD_STEP_COPY[step]!.heading}
+        </h1>
+        <StepExplainer text={WIZARD_STEP_COPY[step]!.description} />
+      </header>
 
       {step === 1 ? (
-        <section className="space-y-3">
-          <h2 className="text-sm font-medium">{WIZARD_STEP_COPY[1]!.heading}</h2>
-          <StepExplainer text={WIZARD_STEP_COPY[1]!.description} />
+        <section className="space-y-4">
           <label className="sr-only" htmlFor="goal">
             Goal statement
           </label>
@@ -168,17 +169,17 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
             rows={4}
             value={draft.goal_statement}
             onChange={(event) => updateDraft({ goal_statement: event.target.value })}
-            className="w-full rounded border border-neutral-300 px-3 py-2 text-sm"
+            className="setup-input setup-textarea"
             placeholder={WIZARD_STEP_COPY[1]!.fields!.goal_statement!.placeholder}
           />
-          <p className="text-xs text-neutral-500">{goalCharCount} / 280 characters</p>
+          <p className="text-xs text-[var(--text-lo)]">{goalCharCount} / 280 characters</p>
           {showRewriteChip ? (
             <button
               type="button"
               onClick={() =>
                 updateDraft({ goal_statement: rewriteGoalPresentTense(draft.goal_statement) })
               }
-              className="rounded-full border border-amber-400 bg-amber-50 px-3 py-1 text-sm text-amber-900"
+              className="chip-pill"
             >
               Rewrite to present tense
             </button>
@@ -187,11 +188,9 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
       ) : null}
 
       {step === 2 ? (
-        <section className="space-y-4">
-          <h2 className="text-sm font-medium">{WIZARD_STEP_COPY[2]!.heading}</h2>
-          <StepExplainer text={WIZARD_STEP_COPY[2]!.description} />
+        <section className="space-y-6">
           <div>
-            <p className="mb-2 text-sm font-medium">Timeframe</p>
+            <p className="setup-label mb-2">Timeframe</p>
             <div className="flex flex-wrap gap-2">
               {TIMEFRAME_PRESET_OPTIONS.map((preset) => (
                 <button
@@ -203,17 +202,17 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
                       localization: { ...draft.localization, timeframe: preset },
                     });
                   }}
-                  className={`rounded-full border px-3 py-1 text-sm ${
+                  className={`chip-pill ${
                     !useCustomDate && draft.localization.timeframe === preset
-                      ? "border-neutral-900 bg-neutral-900 text-white"
-                      : "border-neutral-300"
+                      ? "chip-pill-active"
+                      : ""
                   }`}
                 >
                   {preset}
                 </button>
               ))}
             </div>
-            <label className="mt-3 block text-xs text-neutral-600" htmlFor="timeframe-date">
+            <label className="margin-note mt-3 block" htmlFor="timeframe-date">
               Or pick a date (up to 24 months)
             </label>
             <input
@@ -230,11 +229,11 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
                   localization: { ...draft.localization, timeframe: value },
                 });
               }}
-              className="mt-1 rounded border border-neutral-300 px-3 py-2 text-sm"
+              className="setup-input mt-1.5"
             />
           </div>
           <div>
-            <p className="text-sm font-medium">{WIZARD_STEP_COPY[2]!.fields!.place!.heading}</p>
+            <p className="setup-label">{WIZARD_STEP_COPY[2]!.fields!.place!.heading}</p>
             <label className="sr-only" htmlFor="place">
               Place
             </label>
@@ -248,45 +247,45 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
                 })
               }
               placeholder={WIZARD_STEP_COPY[2]!.fields!.place!.placeholder}
-              className="mt-1 w-full rounded border border-neutral-300 px-3 py-2 text-sm"
+              className="setup-input"
             />
           </div>
         </section>
       ) : null}
 
       {step === 3 ? (
-        <section className="space-y-3">
-          <h2 className="text-sm font-medium">{WIZARD_STEP_COPY[3]!.heading}</h2>
-          <StepExplainer text={WIZARD_STEP_COPY[3]!.description} />
+        <section className="space-y-4">
           {draft.triangulation.map((value, index) => {
             const fieldKey = `prerequisite${index + 1}` as
               | "prerequisite1"
               | "prerequisite2"
               | "prerequisite3";
             return (
-              <input
-                key={index}
-                type="text"
-                value={value}
-                onChange={(event) => {
-                  const next = [...draft.triangulation] as [string, string, string];
-                  next[index] = event.target.value;
-                  updateDraft({ triangulation: next });
-                }}
-                placeholder={WIZARD_STEP_COPY[3]!.fields![fieldKey]!.placeholder}
-                className="w-full rounded border border-neutral-300 px-3 py-2 text-sm"
-              />
+              <div key={index}>
+                <p className="setup-label mb-1.5">
+                  {WIZARD_STEP_COPY[3]!.fields![fieldKey]!.heading}
+                </p>
+                <input
+                  type="text"
+                  value={value}
+                  onChange={(event) => {
+                    const next = [...draft.triangulation] as [string, string, string];
+                    next[index] = event.target.value;
+                    updateDraft({ triangulation: next });
+                  }}
+                  placeholder={WIZARD_STEP_COPY[3]!.fields![fieldKey]!.placeholder}
+                  className="setup-input"
+                />
+              </div>
             );
           })}
         </section>
       ) : null}
 
       {step === 4 ? (
-        <section className="space-y-6">
-          <h2 className="text-sm font-medium">{WIZARD_STEP_COPY[4]!.heading}</h2>
-          <StepExplainer text={WIZARD_STEP_COPY[4]!.description} />
+        <section className="space-y-8">
           <div>
-            <p className="mb-1 text-sm font-medium">
+            <p className="setup-label">
               {WIZARD_STEP_COPY[4]!.fields!.not_list!.heading}
             </p>
             <FieldExplainer text={WIZARD_STEP_COPY[4]!.fields!.not_list!.description} />
@@ -299,7 +298,7 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
             />
           </div>
           <div>
-            <p className="mb-1 text-sm font-medium">
+            <p className="setup-label">
               {WIZARD_STEP_COPY[4]!.fields!.wrong_pulls!.heading}
             </p>
             <FieldExplainer text={WIZARD_STEP_COPY[4]!.fields!.wrong_pulls!.description} />
@@ -314,9 +313,7 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
       ) : null}
 
       {step === 5 ? (
-        <section className="space-y-3">
-          <h2 className="text-sm font-medium">{WIZARD_STEP_COPY[5]!.heading}</h2>
-          <StepExplainer text={WIZARD_STEP_COPY[5]!.description} />
+        <section className="space-y-4">
           <ChipInput
             values={draft.features}
             onChange={(features) => updateDraft({ features })}
@@ -332,10 +329,8 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
 
       {step === 6 ? (
         <section className="space-y-4">
-          <h2 className="text-sm font-medium">{WIZARD_STEP_COPY[6]!.heading}</h2>
-          <StepExplainer text={WIZARD_STEP_COPY[6]!.description} />
           {draft.sync_actions.map((item, index) => (
-            <div key={index} className="space-y-2 rounded border border-neutral-200 p-3">
+            <div key={index} className="space-y-3 rounded-[var(--radius)] border border-[var(--setup-border)] p-4">
               <input
                 type="text"
                 value={item.action}
@@ -345,7 +340,7 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
                   updateDraft({ sync_actions });
                 }}
                 placeholder={WIZARD_STEP_COPY[6]!.fields!.action!.placeholder}
-                className="w-full rounded border border-neutral-300 px-3 py-2 text-sm"
+                className="setup-input"
               />
               <input
                 type="date"
@@ -359,7 +354,7 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
                   updateDraft({ sync_actions });
                 }}
                 title={WIZARD_STEP_COPY[6]!.fields!.deadline!.placeholder}
-                className="rounded border border-neutral-300 px-3 py-2 text-sm"
+                className="setup-input"
               />
               {draft.sync_actions.length > 1 ? (
                 <button
@@ -369,7 +364,7 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
                       sync_actions: draft.sync_actions.filter((_, i) => i !== index),
                     })
                   }
-                  className="text-xs text-red-700"
+                  className="btn-link text-error"
                 >
                   Remove action
                 </button>
@@ -384,7 +379,7 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
                   sync_actions: [...draft.sync_actions, { action: "" }],
                 })
               }
-              className="text-sm text-neutral-700 underline"
+              className="btn-link"
             >
               Add action
             </button>
@@ -393,19 +388,17 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
       ) : null}
 
       {step === 7 ? (
-        <section className="space-y-5">
-          <h2 className="text-sm font-medium">{WIZARD_STEP_COPY[7]!.heading}</h2>
-          <StepExplainer text={WIZARD_STEP_COPY[7]!.description} />
+        <section className="space-y-6">
           <div>
-            <p className="text-sm font-medium">Duration</p>
-            <p className="mt-1 rounded border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm">
+            <p className="setup-label">Duration</p>
+            <p className="setup-input mt-1.5 cursor-default opacity-90">
               40 minutes (locked) — more lengths coming in v0.5
             </p>
           </div>
 
           <fieldset>
-            <legend className="text-sm font-medium">Entrainment mode</legend>
-            <div className="mt-2 flex gap-4 text-sm">
+            <legend className="setup-label">Entrainment mode</legend>
+            <div className="mt-3 flex gap-4 text-sm text-[var(--text-hi)]">
               {(["isochronic", "binaural"] as const).map((mode) => (
                 <label key={mode} className="flex items-center gap-2">
                   <input
@@ -425,7 +418,7 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
           </fieldset>
 
           <div>
-            <p className="mb-2 text-sm font-medium">Senses emphasis (min 2)</p>
+            <p className="setup-label mb-3">Senses emphasis (min 2)</p>
             <div className="flex flex-wrap gap-2">
               {SENSE_OPTIONS.map((sense) => {
                 const selected = draft.session.senses_emphasis.includes(sense);
@@ -434,11 +427,7 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
                     key={sense}
                     type="button"
                     onClick={() => toggleSense(sense)}
-                    className={`rounded-full border px-3 py-1 text-sm ${
-                      selected
-                        ? "border-neutral-900 bg-neutral-900 text-white"
-                        : "border-neutral-300"
-                    }`}
+                    className={`chip-pill ${selected ? "chip-pill-active" : ""}`}
                   >
                     {sense}
                   </button>
@@ -448,8 +437,8 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
           </div>
 
           <fieldset>
-            <legend className="text-sm font-medium">Voice</legend>
-            <div className="mt-2 space-y-2 text-sm">
+            <legend className="setup-label">Voice</legend>
+            <div className="mt-3 space-y-2 text-sm text-[var(--text-hi)]">
               <label className="flex items-center gap-2">
                 <input
                   type="radio"
@@ -470,8 +459,8 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
                   My voice
                 </label>
               ) : (
-                <p className="text-xs text-neutral-500">
-                  <Link href="/voice" className="underline">
+                <p className="margin-note">
+                  <Link href="/voice" className="btn-link">
                     Record your voice
                   </Link>{" "}
                   to unlock the own-voice option.
@@ -484,13 +473,13 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
             <button
               type="button"
               onClick={() => setShowAdvanced((current) => !current)}
-              className="text-sm text-neutral-700 underline"
+              className="btn-link"
             >
               {showAdvanced ? "Hide" : "Show"} advanced
             </button>
             {showAdvanced ? (
-              <div className="mt-2">
-                <label className="block text-sm font-medium" htmlFor="aos_layer">
+              <div className="mt-3">
+                <label className="setup-label" htmlFor="aos_layer">
                   AOS layer (optional)
                 </label>
                 <select
@@ -506,7 +495,7 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
                       },
                     })
                   }
-                  className="mt-1 rounded border border-neutral-300 px-3 py-2 text-sm"
+                  className="setup-input mt-1.5"
                 >
                   <option value="">None</option>
                   <option value="ego">ego</option>
@@ -519,29 +508,25 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
           </div>
 
           {insufficientCredits ? (
-            <p className="text-sm text-amber-700">Insufficient credits for generation.</p>
+            <p className="text-warning">Insufficient credits for generation.</p>
           ) : null}
-          {submitError ? <p className="text-sm text-red-700">{submitError}</p> : null}
+          {submitError ? <p className="text-error">{submitError}</p> : null}
         </section>
       ) : null}
 
-      {stepError ? <p className="text-sm text-red-700">{stepError}</p> : null}
+      {stepError ? <p className="text-error">{stepError}</p> : null}
 
-      <div className="flex items-center justify-between border-t border-neutral-200 pt-4">
+      <div className="flex items-center justify-between border-t border-[var(--setup-border)] pt-6">
         <button
           type="button"
           onClick={goBack}
           disabled={step === 1 || pending}
-          className="rounded border border-neutral-300 px-4 py-2 text-sm disabled:opacity-40"
+          className="btn-ghost"
         >
           Back
         </button>
         {step < STEP_COUNT ? (
-          <button
-            type="button"
-            onClick={goNext}
-            className="rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-white"
-          >
+          <button type="button" onClick={goNext} className="btn-clay">
             Next
           </button>
         ) : (
@@ -549,7 +534,7 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
             type="button"
             onClick={() => void handleSubmit()}
             disabled={pending}
-            className="rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            className="btn-clay"
           >
             {pending ? "Starting…" : "Generate script"}
           </button>

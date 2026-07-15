@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { AuthHeader } from "@/components/auth-header";
+import { SetupHeader } from "@/components/setup-header";
 import { getSessionUser } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { isRealReadyProfile } from "@/lib/voice/process-voice-sample";
@@ -23,14 +23,14 @@ export default async function WizardPage() {
     : "Default stock voice";
 
   return (
-    <>
-      <AuthHeader />
-      <main className="mx-auto max-w-2xl p-6">
+    <div className="setup-ground min-h-dvh">
+      <SetupHeader />
+      <main className="mx-auto max-w-xl px-4 py-8 sm:px-6">
         <WizardFlow
           readyVoiceProfileId={readyVoiceProfileId}
           stockVoiceLabel={stockVoiceLabel}
         />
       </main>
-    </>
+    </div>
   );
 }
