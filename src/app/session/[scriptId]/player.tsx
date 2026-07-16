@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChoiceControl } from "@/components/choice-control";
 import { Mark } from "@/components/mark";
+import { SessionField } from "@/components/session-field";
 import { PhaseJourney, SessionPulse } from "@/components/session-pulse";
 import type { PlaybackManifest } from "@/lib/playback/manifest";
 import { EntrainmentEngine, type EntrainmentMode } from "@/lib/audio/engine";
@@ -99,15 +101,17 @@ async function fetchCompressedBuffers(
 }
 
 function AudioDebugStrip({
+  show,
   debug,
   engineReady,
   onTestTone,
 }: {
+  show: boolean;
   debug: DebugSnapshot;
   engineReady: boolean;
   onTestTone: () => void;
 }) {
-  if (!IS_DEV) return null;
+  if (!show) return null;
 
   const ctxTimeLabel = debug.ctxTime != null ? debug.ctxTime.toFixed(1) : "—";
 
@@ -140,6 +144,17 @@ function AudioDebugStrip({
   );
 }
 
+function useDebugStripEnabled(): boolean {
+  const [queryEnabled, setQueryEnabled] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setQueryEnabled(params.get("debug") === "1");
+  }, []);
+
+  return IS_DEV && queryEnabled;
+}
+
 export function SessionPlayer({ manifest }: SessionPlayerProps) {
   const isTestGeneration = isTestGenerationProvider(manifest.meta.provider);
   const schedule = useMemo(() => computeSegmentSchedule(manifest.segments), [manifest.segments]);
@@ -168,6 +183,7 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
   const [debug, setDebug] = useState<DebugSnapshot>(EMPTY_DEBUG);
   const [scrubSec, setScrubSec] = useState<number | null>(null);
   const [showForwardSeekHint, setShowForwardSeekHint] = useState(false);
+  const debugEnabled = useDebugStripEnabled();
 
   const engineRef = useRef<EntrainmentEngine | null>(null);
   const decodeWindowRef = useRef(new JitDecodeWindow(3));
@@ -274,7 +290,7 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
   );
 
   useEffect(() => {
-    if (!IS_DEV || stage !== "readyToPlay") {
+    if (!debugEnabled || stage !== "readyToPlay") {
       if (debugTickRef.current) {
         clearInterval(debugTickRef.current);
         debugTickRef.current = null;
@@ -290,7 +306,7 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
         debugTickRef.current = null;
       }
     };
-  }, [stage, updateDebugSnapshot]);
+  }, [debugEnabled, stage, updateDebugSnapshot]);
 
   const ensureDecoded = useCallback(async (seq: number) => {
     if (isTestGeneration) return;
@@ -665,18 +681,20 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
 
   const debugStrip = (
     <AudioDebugStrip
+      show={debugEnabled}
       debug={debug}
       engineReady={engineReady}
       onTestTone={handleTestTone}
     />
   );
 
-  const debugPad = IS_DEV && (stage === "readyToPlay" || stage === "playing" || stage === "paused");
+  const debugPad =
+    debugEnabled && (stage === "readyToPlay" || stage === "playing" || stage === "paused");
 
   if (stage === "prebegin") {
     return (
-      <main className="session-field flex min-h-dvh flex-col items-center justify-center px-4 py-10">
-        <div className="w-full max-w-md space-y-8">
+      <SessionField phase="alpha" className="items-center justify-center px-4 py-10">
+        <div className="session-column w-full max-w-md space-y-8">
           <div className="text-center">
             <Mark size={32} className="mx-auto mb-4" />
             <h1 className="font-display text-2xl font-normal">Before you begin</h1>
@@ -705,12 +723,12 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
           <button
             type="button"
             onClick={() => void startPlayback()}
-            className="btn-session w-full py-3 text-base"
+            className="btn-sand w-full py-3 text-base"
           >
             Begin session
           </button>
         </div>
-      </main>
+      </SessionField>
     );
   }
 
@@ -720,8 +738,8 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
         ? Math.round((fetchProgress.loaded / fetchProgress.total) * 100)
         : 0;
     return (
-      <main className="session-field flex min-h-dvh flex-col items-center justify-center px-4 py-10">
-        <div className="w-full max-w-md space-y-6 text-center">
+      <SessionField phase="alpha" className="items-center justify-center px-4 py-10">
+        <div className="session-column w-full max-w-md space-y-6 text-center">
           <Mark size={40} className="loading-mark mx-auto" />
           <h1 className="font-display text-xl font-normal">Preparing audio</h1>
           <p className="text-sm text-[var(--session-mid)]">
@@ -734,17 +752,18 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
             />
           </div>
         </div>
-      </main>
+      </SessionField>
     );
   }
 
   if (stage === "readyToPlay") {
     return (
       <>
-        <main
-          className={`session-field flex min-h-dvh flex-col items-center justify-center px-4 py-10 ${debugPad ? "pb-20" : ""}`}
+        <SessionField
+          phase="alpha"
+          className={`items-center justify-center px-4 py-10 ${debugPad ? "pb-20" : ""}`}
         >
-          <div className="w-full max-w-md space-y-6 text-center">
+          <div className="session-column w-full max-w-md space-y-6 text-center">
             <SessionPulse beatHz={initialBeatHz} />
             <h1 className="font-display text-xl font-normal">Ready to play</h1>
             <p className="text-sm text-[var(--session-mid)]">
@@ -755,12 +774,12 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
             <button
               type="button"
               onClick={() => void startAudio()}
-              className="btn-session w-full py-4 text-base"
+              className="btn-sand w-full py-4 text-base"
             >
               Start audio
             </button>
           </div>
-        </main>
+        </SessionField>
         {debugStrip}
       </>
     );
@@ -768,8 +787,8 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
 
   if (stage === "rating") {
     return (
-      <main className="session-field flex min-h-dvh flex-col items-center justify-center px-4 py-10">
-        <div className="w-full max-w-md space-y-6">
+      <SessionField phase="gamma" className="items-center justify-center px-4 py-10">
+        <div className="session-column w-full max-w-md space-y-6">
           <h1 className="font-display text-center text-xl font-normal">How alert do you feel?</h1>
           <p className="text-center text-sm text-[var(--session-mid)]">
             Rate your alertness from 1 (very drowsy) to 5 (fully alert).
@@ -795,31 +814,31 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
           <button
             type="button"
             onClick={() => void submitRating()}
-            className="btn-session w-full py-3"
+            className="btn-sand w-full py-3"
           >
             Save and finish
           </button>
         </div>
-      </main>
+      </SessionField>
     );
   }
 
   if (stage === "done") {
     return (
-      <main className="session-field flex min-h-dvh flex-col items-center justify-center px-4 py-10">
-        <div className="w-full max-w-md space-y-4 text-center">
+      <SessionField phase="gamma" className="items-center justify-center px-4 py-10">
+        <div className="session-column w-full max-w-md space-y-4 text-center">
           <Mark size={32} className="mx-auto" />
           <h1 className="font-display text-xl font-normal">Session complete</h1>
           <p className="text-sm text-[var(--session-mid)]">Your exit alertness rating was saved.</p>
         </div>
-      </main>
+      </SessionField>
     );
   }
 
   return (
     <>
-      <main className={`session-field flex min-h-dvh flex-col ${debugPad ? "pb-20" : ""}`}>
-        <div className="flex flex-1 flex-col items-center justify-center px-4 py-6">
+      <SessionField phase={currentPhase} className={debugPad ? "pb-20" : ""}>
+        <div className="session-column flex flex-1 flex-col items-center justify-center px-4 py-6">
           <PhaseJourney phases={phases} currentPhase={currentPhase} />
           <SessionPulse beatHz={currentBeatHz} className="my-6 sm:my-8" />
           <p className="font-display text-center text-3xl font-normal capitalize sm:text-4xl">
@@ -830,7 +849,7 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
           </p>
         </div>
 
-        <footer className="space-y-4 px-4 pb-6 pt-2">
+        <footer className="session-column space-y-4 px-4 pb-6 pt-2">
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -919,24 +938,20 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
 
               <fieldset className="space-y-2">
                 <legend className="text-[var(--session-text)]">Entrainment mode</legend>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="radio"
-                    name="mode"
-                    checked={mode === "isochronic"}
-                    onChange={() => handleModeChange("isochronic")}
-                  />
+                <ChoiceControl
+                  name="mode"
+                  checked={mode === "isochronic"}
+                  onChange={() => handleModeChange("isochronic")}
+                >
                   Isochronic (speakers OK)
-                </label>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="radio"
-                    name="mode"
-                    checked={mode === "binaural"}
-                    onChange={() => handleModeChange("binaural")}
-                  />
+                </ChoiceControl>
+                <ChoiceControl
+                  name="mode"
+                  checked={mode === "binaural"}
+                  onChange={() => handleModeChange("binaural")}
+                >
                   Binaural (requires headphones)
-                </label>
+                </ChoiceControl>
               </fieldset>
             </div>
           </details>
@@ -946,7 +961,7 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
             Keep this screen visible for uninterrupted playback.
           </p>
         </footer>
-      </main>
+      </SessionField>
       {debugStrip}
     </>
   );

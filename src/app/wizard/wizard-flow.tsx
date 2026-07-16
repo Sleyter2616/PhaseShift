@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
+import { ChoiceControl } from "@/components/choice-control";
 import {
   hasConcreteNounToken,
   maxTimeframeIsoDate,
@@ -398,21 +399,20 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
 
           <fieldset>
             <legend className="setup-label">Entrainment mode</legend>
-            <div className="mt-3 flex gap-4 text-sm text-[var(--text-hi)]">
+            <div className="mt-3 flex flex-wrap gap-4 text-[var(--text-hi)]">
               {(["isochronic", "binaural"] as const).map((mode) => (
-                <label key={mode} className="flex items-center gap-2">
-                  <input
-                    type="radio"
-                    name="entrainment_mode"
-                    checked={draft.session.entrainment_mode === mode}
-                    onChange={() =>
-                      updateDraft({
-                        session: { ...draft.session, entrainment_mode: mode },
-                      })
-                    }
-                  />
+                <ChoiceControl
+                  key={mode}
+                  name="entrainment_mode"
+                  checked={draft.session.entrainment_mode === mode}
+                  onChange={() =>
+                    updateDraft({
+                      session: { ...draft.session, entrainment_mode: mode },
+                    })
+                  }
+                >
                   {mode}
-                </label>
+                </ChoiceControl>
               ))}
             </div>
           </fieldset>
@@ -438,26 +438,22 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
 
           <fieldset>
             <legend className="setup-label">Voice</legend>
-            <div className="mt-3 space-y-2 text-sm text-[var(--text-hi)]">
-              <label className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  name="voice"
-                  checked={draft.voice_profile_id === null}
-                  onChange={() => updateDraft({ voice_profile_id: null })}
-                />
+            <div className="mt-3 space-y-2 text-[var(--text-hi)]">
+              <ChoiceControl
+                name="voice"
+                checked={draft.voice_profile_id === null}
+                onChange={() => updateDraft({ voice_profile_id: null })}
+              >
                 {stockVoiceLabel}
-              </label>
+              </ChoiceControl>
               {readyVoiceProfileId ? (
-                <label className="flex items-center gap-2">
-                  <input
-                    type="radio"
-                    name="voice"
-                    checked={draft.voice_profile_id === readyVoiceProfileId}
-                    onChange={() => updateDraft({ voice_profile_id: readyVoiceProfileId })}
-                  />
+                <ChoiceControl
+                  name="voice"
+                  checked={draft.voice_profile_id === readyVoiceProfileId}
+                  onChange={() => updateDraft({ voice_profile_id: readyVoiceProfileId })}
+                >
                   My voice
-                </label>
+                </ChoiceControl>
               ) : (
                 <p className="margin-note">
                   <Link href="/voice" className="btn-link">
