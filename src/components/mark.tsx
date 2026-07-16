@@ -18,7 +18,7 @@ export function Mark({ size = 24, className = "", labeled = false }: MarkProps) 
     >
       {labeled ? <title>PhaseShift</title> : null}
       <polygon
-        points="12,2 22,20 2,20"
+        points="12,2.5 20.23,16.75 3.77,16.75"
         stroke="var(--accent-sand)"
         strokeWidth="1.25"
         strokeLinejoin="round"
@@ -26,7 +26,7 @@ export function Mark({ size = 24, className = "", labeled = false }: MarkProps) 
         opacity="0.85"
       />
       <polygon
-        points="12,22 2,4 22,4"
+        points="12,21.5 20.23,7.25 3.77,7.25"
         stroke="var(--accent-sand)"
         strokeWidth="1.25"
         strokeLinejoin="round"
