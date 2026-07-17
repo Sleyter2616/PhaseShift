@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import { AutoRefresh } from "@/components/auto-refresh";
 import { Mark } from "@/components/mark";
 import { SetupHeader } from "@/components/setup-header";
 import { getSessionUser } from "@/lib/auth/session";
@@ -53,7 +54,7 @@ export default async function DevScriptStatusPage({ params }: PageProps) {
     <div className="setup-ground min-h-dvh">
       <SetupHeader />
       <main className="mx-auto max-w-3xl space-y-8 px-4 py-8 sm:px-6">
-        <meta httpEquiv="refresh" content="2" />
+        <AutoRefresh />
 
         <header className="space-y-3">
           <p className="step-eyebrow">Generation status</p>
