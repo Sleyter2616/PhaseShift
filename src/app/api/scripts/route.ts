@@ -1,9 +1,9 @@
 import { z } from "zod";
 import { NextResponse } from "next/server";
 import { isInsufficientCreditsError } from "@/lib/auth/session";
+import { creditsPerGeneration } from "@/lib/billing/plans";
 import { createScriptBodySchema } from "@/lib/contracts/intake";
 import { PROMPT_VERSION } from "@/lib/compiler/prompt.v1.4";
-import { GENERATION_COST_CREDITS } from "@/lib/costs";
 import { getServiceClient } from "@/lib/db/service-client";
 import { inngest } from "@/inngest/client";
 import { buildCompilerInput } from "@/lib/session/derive";
@@ -67,6 +67,7 @@ export async function POST(request: Request) {
     }
 
     const ttsModelId = defaultTtsModelIdForScript(voiceProfileId);
+    const generationCost = creditsPerGeneration(ttsModelId);
 
     const title = intake.goal_statement.slice(0, 80);
     let goalId: string;
@@ -155,7 +156,7 @@ export async function POST(request: Request) {
 
     const { error: spendError } = await supabase.rpc("spend_credits", {
       p_script: script.id,
-      p_amount: GENERATION_COST_CREDITS,
+      p_amount: generationCost,
       p_reason: "generation",
     });
 
@@ -182,7 +183,7 @@ export async function POST(request: Request) {
       await service.rpc("refund_credits", {
         p_user: userId,
         p_script: script.id,
-        p_amount: GENERATION_COST_CREDITS,
+        p_amount: generationCost,
       });
       await supabase
         .from("scripts")
