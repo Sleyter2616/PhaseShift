@@ -1,5 +1,8 @@
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { AuthHeader } from "@/components/auth-header";
+import { AutoRefresh } from "@/components/auto-refresh";
+import { Mark } from "@/components/mark";
+import { SetupHeader } from "@/components/setup-header";
 import { getSessionUser } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 
@@ -7,6 +10,10 @@ export const revalidate = 2;
 
 interface PageProps {
   params: Promise<{ id: string }>;
+}
+
+function formatStatus(status: string): string {
+  return status.replace(/_/g, " ");
 }
 
 export default async function DevScriptStatusPage({ params }: PageProps) {
@@ -41,49 +48,99 @@ export default async function DevScriptStatusPage({ params }: PageProps) {
     return { phase, total: phaseSegments.length, statusCounts };
   });
 
+  const isReady = script.status === "ready";
+
   return (
-    <>
-      <AuthHeader />
-      <main className="mx-auto max-w-3xl p-6 font-mono text-sm">
-        <meta httpEquiv="refresh" content="2" />
-        <h1 className="mb-4 text-lg font-semibold">Script {id}</h1>
-        <div className="space-y-3">
-          <p>
-            <strong>status:</strong> {script.status}
-          </p>
-          <p>
-            <strong>total_duration_sec:</strong> {script.total_duration_sec ?? "—"}
-          </p>
+    <div className="setup-ground min-h-dvh">
+      <SetupHeader />
+      <main className="mx-auto max-w-3xl space-y-8 px-4 py-8 sm:px-6">
+        <AutoRefresh />
+
+        <header className="space-y-3">
+          <p className="step-eyebrow">Generation status</p>
+          <div className="flex items-start gap-3">
+            <Mark size={28} className={isReady ? undefined : "loading-mark"} />
+            <div className="min-w-0">
+              <h1 className="font-display text-2xl font-normal text-[var(--text-hi)]">
+                Script status
+              </h1>
+              <p className="mt-1 truncate font-mono text-xs text-[var(--text-mid)]">{id}</p>
+            </div>
+          </div>
+        </header>
+
+        <section className="setup-panel space-y-4 p-5">
+          <dl className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <dt className="text-xs text-[var(--text-mid)]">Status</dt>
+              <dd className="mt-1 text-sm font-medium text-[var(--text-hi)]">
+                {formatStatus(script.status)}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-[var(--text-mid)]">Duration</dt>
+              <dd className="mt-1 text-sm text-[var(--text-hi)]">
+                {script.total_duration_sec != null
+                  ? `${Math.round(script.total_duration_sec / 60)} min (${script.total_duration_sec}s)`
+                  : "—"}
+              </dd>
+            </div>
+          </dl>
+
           {script.error_message ? (
-            <p className="text-amber-700">
-              <strong>error_message:</strong> {script.error_message}
+            <p className="text-warning text-sm">
+              <span className="font-medium">Error:</span> {script.error_message}
             </p>
           ) : null}
-          <table className="w-full border-collapse border border-neutral-300">
-            <thead>
-              <tr>
-                <th className="border border-neutral-300 p-2 text-left">phase</th>
-                <th className="border border-neutral-300 p-2 text-left">segments</th>
-                <th className="border border-neutral-300 p-2 text-left">synthesis_status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {phaseRollup.map((row) => (
-                <tr key={row.phase}>
-                  <td className="border border-neutral-300 p-2">{row.phase}</td>
-                  <td className="border border-neutral-300 p-2">{row.total}</td>
-                  <td className="border border-neutral-300 p-2">
-                    {Object.entries(row.statusCounts)
-                      .map(([status, count]) => `${status}:${count}`)
-                      .join(", ") || "—"}
-                  </td>
+
+          {isReady ? (
+            <Link href={`/session/${id}`} className="btn-clay inline-flex px-5 py-2.5">
+              Play session
+            </Link>
+          ) : null}
+        </section>
+
+        <section className="space-y-3">
+          <h2 className="font-display text-lg font-normal text-[var(--text-hi)]">Phases</h2>
+          <div className="overflow-hidden rounded-[var(--radius)] border border-[var(--setup-border)]">
+            <table className="w-full border-collapse text-sm">
+              <thead>
+                <tr className="border-b border-[var(--setup-border)] bg-[var(--setup-panel)]">
+                  <th className="px-4 py-2.5 text-left font-medium text-[var(--text-mid)]">
+                    Phase
+                  </th>
+                  <th className="px-4 py-2.5 text-left font-medium text-[var(--text-mid)]">
+                    Segments
+                  </th>
+                  <th className="px-4 py-2.5 text-left font-medium text-[var(--text-mid)]">
+                    Synthesis
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          <p className="text-neutral-500">Auto-refresh every 2s</p>
-        </div>
+              </thead>
+              <tbody>
+                {phaseRollup.map((row) => (
+                  <tr key={row.phase} className="border-b border-[var(--setup-border)] last:border-b-0">
+                    <td className="px-4 py-2.5 capitalize text-[var(--text-hi)]">{row.phase}</td>
+                    <td className="px-4 py-2.5 text-[var(--text-mid)]">{row.total}</td>
+                    <td className="px-4 py-2.5 font-mono text-xs text-[var(--text-mid)]">
+                      {Object.entries(row.statusCounts)
+                        .map(([status, count]) => `${status}:${count}`)
+                        .join(", ") || "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-xs text-[var(--text-lo)]">Auto-refresh every 2s</p>
+        </section>
+
+        <p>
+          <Link href="/scripts" className="btn-link">
+            Back to sessions
+          </Link>
+        </p>
       </main>
-    </>
+    </div>
   );
 }

@@ -1,14 +1,43 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { AuthHeader } from "@/components/auth-header";
+import { Mark } from "@/components/mark";
+import { SetupHeader } from "@/components/setup-header";
 import { getSessionUser } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
+import {
+  synthesisProvenanceBadge,
+  type ScriptSynthesisSource,
+} from "@/lib/synthesis/provenance";
 import { DevGoldenScriptButton } from "./dev-golden-script-button";
 import { NewScriptButton } from "./new-script-button";
-import { synthesisProvenanceBadge } from "@/lib/synthesis/provenance";
 
 function formatDate(iso: string): string {
-  return new Date(iso).toLocaleString();
+  return new Date(iso).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function formatDuration(sec: number | null): string {
+  if (sec == null) return "";
+  return `${Math.round(sec / 60)} min`;
+}
+
+function formatStatus(status: string): string {
+  return status.replace(/_/g, " ");
+}
+
+type RowAccent = "sand" | "clay" | "muted";
+
+function rowAccentFor(
+  script: ScriptSynthesisSource & { status: string },
+): RowAccent {
+  if (script.status === "failed") return "muted";
+  if (script.voice_profile_id) return "sand";
+  return "clay";
 }
 
 export default async function ScriptsPage() {
@@ -25,21 +54,24 @@ export default async function ScriptsPage() {
 
   if (error) {
     return (
-      <>
-        <AuthHeader />
-        <main className="mx-auto max-w-3xl p-6">
-          <p className="text-sm text-red-700">Failed to load scripts: {error.message}</p>
+      <div className="setup-ground min-h-dvh">
+        <SetupHeader />
+        <main className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+          <p className="text-error">Failed to load scripts: {error.message}</p>
         </main>
-      </>
+      </div>
     );
   }
 
   return (
-    <>
-      <AuthHeader />
-      <main className="mx-auto max-w-3xl space-y-6 p-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <h1 className="text-2xl font-semibold">Your scripts</h1>
+    <div className="setup-ground min-h-dvh">
+      <SetupHeader />
+      <main className="mx-auto max-w-3xl space-y-8 px-4 py-8 sm:px-6">
+        <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+          <h1 className="flex items-center gap-2.5 font-display text-2xl font-normal text-[var(--text-hi)]">
+            <Mark size={22} />
+            Your sessions
+          </h1>
           <div className="flex flex-col gap-2 sm:items-end">
             <NewScriptButton />
             {process.env.NODE_ENV === "development" ? <DevGoldenScriptButton /> : null}
@@ -47,55 +79,55 @@ export default async function ScriptsPage() {
         </div>
 
         {scripts && scripts.length > 0 ? (
-          <ul className="divide-y divide-neutral-200 rounded border border-neutral-200">
-            {scripts.map((script) => (
-              <li key={script.id} className="flex items-center justify-between gap-4 px-4 py-3">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="truncate font-mono text-sm">{script.id}</p>
-                    <span className="shrink-0 rounded-full border border-neutral-300 bg-neutral-50 px-2 py-0.5 text-xs text-neutral-700">
-                      {synthesisProvenanceBadge(script)}
-                    </span>
+          <ul className="overflow-hidden rounded-[var(--radius)] border border-[var(--setup-border)]">
+            {scripts.map((script) => {
+              const accent = rowAccentFor(script);
+              return (
+                <li key={script.id} className={`list-row list-row-accent-${accent}`}>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="truncate text-sm font-medium text-[var(--text-hi)]">
+                        {script.id}
+                      </p>
+                      <span className="provider-badge">{synthesisProvenanceBadge(script)}</span>
+                    </div>
+                    <p className={`mt-1 text-sm list-row-status-${accent}`}>
+                      {formatStatus(script.status)}
+                      {script.total_duration_sec != null
+                        ? ` · ${formatDuration(script.total_duration_sec)}`
+                        : ""}
+                      {" · "}
+                      <span className="text-[var(--text-mid)]">{formatDate(script.created_at)}</span>
+                    </p>
                   </div>
-                  <p className="text-xs text-neutral-500">
-                    {script.status}
-                    {script.total_duration_sec != null
-                      ? ` · ${Math.round(script.total_duration_sec / 60)} min`
-                      : ""}
-                    {" · "}
-                    {formatDate(script.created_at)}
-                  </p>
-                </div>
-                <div className="flex shrink-0 gap-2 text-sm">
-                  {script.status === "ready" ? (
-                    <Link
-                      href={`/session/${script.id}`}
-                      className="rounded bg-neutral-900 px-3 py-1.5 text-white"
-                    >
-                      Play
-                    </Link>
-                  ) : (
-                    <Link
-                      href={`/dev/scripts/${script.id}`}
-                      className="rounded border border-neutral-300 px-3 py-1.5"
-                    >
-                      Status
-                    </Link>
-                  )}
-                </div>
-              </li>
-            ))}
+                  <div className="shrink-0">
+                    {script.status === "ready" ? (
+                      <Link href={`/session/${script.id}`} className="btn-clay px-4 py-1.5 text-sm">
+                        Play
+                      </Link>
+                    ) : (
+                      <Link
+                        href={`/dev/scripts/${script.id}`}
+                        className="btn-ghost px-4 py-1.5 text-sm"
+                      >
+                        Status
+                      </Link>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         ) : (
-          <p className="text-sm text-neutral-600">
-            No scripts yet.{" "}
-            <Link href="/wizard" className="underline">
+          <p className="text-sm text-[var(--text-mid)]">
+            No sessions yet.{" "}
+            <Link href="/wizard" className="btn-link">
               Start the intake wizard
             </Link>{" "}
             to generate your first 40-minute script.
           </p>
         )}
       </main>
-    </>
+    </div>
   );
 }

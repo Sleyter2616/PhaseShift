@@ -1,6 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChoiceControl } from "@/components/choice-control";
+import { Mark } from "@/components/mark";
+import { SessionField } from "@/components/session-field";
+import { PhaseJourney, SessionPulse } from "@/components/session-pulse";
 import type { PlaybackManifest } from "@/lib/playback/manifest";
 import { EntrainmentEngine, type EntrainmentMode } from "@/lib/audio/engine";
 import { JitDecodeWindow } from "@/lib/audio/decode-window";
@@ -97,15 +101,17 @@ async function fetchCompressedBuffers(
 }
 
 function AudioDebugStrip({
+  show,
   debug,
   engineReady,
   onTestTone,
 }: {
+  show: boolean;
   debug: DebugSnapshot;
   engineReady: boolean;
   onTestTone: () => void;
 }) {
-  if (!IS_DEV) return null;
+  if (!show) return null;
 
   const ctxTimeLabel = debug.ctxTime != null ? debug.ctxTime.toFixed(1) : "—";
 
@@ -138,6 +144,17 @@ function AudioDebugStrip({
   );
 }
 
+function useDebugStripEnabled(): boolean {
+  const [queryEnabled, setQueryEnabled] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setQueryEnabled(params.get("debug") === "1");
+  }, []);
+
+  return IS_DEV && queryEnabled;
+}
+
 export function SessionPlayer({ manifest }: SessionPlayerProps) {
   const isTestGeneration = isTestGenerationProvider(manifest.meta.provider);
   const schedule = useMemo(() => computeSegmentSchedule(manifest.segments), [manifest.segments]);
@@ -146,6 +163,10 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
     [manifest.meta.entrainment_plan, schedule],
   );
   const totalSec = useMemo(() => totalPlaybackSec(schedule), [schedule]);
+  const phases = useMemo(
+    () => manifest.meta.entrainment_plan.map((entry) => entry.phase),
+    [manifest.meta.entrainment_plan],
+  );
   const initialBeatHz =
     manifest.meta.entrainment_plan[0]?.hz ?? manifest.segments[0]?.entrainment_hz ?? 10;
 
@@ -162,6 +183,7 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
   const [debug, setDebug] = useState<DebugSnapshot>(EMPTY_DEBUG);
   const [scrubSec, setScrubSec] = useState<number | null>(null);
   const [showForwardSeekHint, setShowForwardSeekHint] = useState(false);
+  const debugEnabled = useDebugStripEnabled();
 
   const engineRef = useRef<EntrainmentEngine | null>(null);
   const decodeWindowRef = useRef(new JitDecodeWindow(3));
@@ -268,7 +290,7 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
   );
 
   useEffect(() => {
-    if (!IS_DEV || stage !== "readyToPlay") {
+    if (!debugEnabled || stage !== "readyToPlay") {
       if (debugTickRef.current) {
         clearInterval(debugTickRef.current);
         debugTickRef.current = null;
@@ -284,7 +306,7 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
         debugTickRef.current = null;
       }
     };
-  }, [stage, updateDebugSnapshot]);
+  }, [debugEnabled, stage, updateDebugSnapshot]);
 
   const ensureDecoded = useCallback(async (seq: number) => {
     if (isTestGeneration) return;
@@ -652,50 +674,61 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
 
   const engineReady = stage === "playing" || stage === "paused";
   const displayElapsedSec = scrubSec ?? elapsedSec;
+  const currentBeatHz = useMemo(() => {
+    const entry = manifest.meta.entrainment_plan.find((plan) => plan.phase === currentPhase);
+    return entry?.hz ?? initialBeatHz;
+  }, [currentPhase, initialBeatHz, manifest.meta.entrainment_plan]);
 
   const debugStrip = (
     <AudioDebugStrip
+      show={debugEnabled}
       debug={debug}
       engineReady={engineReady}
       onTestTone={handleTestTone}
     />
   );
 
-  const debugPad = IS_DEV && (stage === "readyToPlay" || stage === "playing" || stage === "paused");
+  const debugPad =
+    debugEnabled && (stage === "readyToPlay" || stage === "playing" || stage === "paused");
 
   if (stage === "prebegin") {
     return (
-      <main className="mx-auto max-w-xl space-y-6 p-6">
-        <h1 className="text-2xl font-semibold">Before you begin</h1>
-        <ul className="list-disc space-y-3 pl-5 text-sm leading-relaxed text-neutral-700">
-          <li>
-            Entrainment tones use rhythmic frequencies that may affect people with a history of
-            seizures or photosensitive epilepsy. Do not use this session if you have that history.
-          </li>
-          <li>Do not use PhaseShift while driving or operating machinery.</li>
-          <li>
-            PhaseShift is not a medical device and is not a substitute for professional medical or
-            mental health care.
-          </li>
-          <li>
-            Keep your screen on and leave this app in the foreground. v0 playback requires the
-            session screen to stay visible.
-          </li>
-        </ul>
-        {isTestGeneration ? (
-          <p className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-            This is a test generation — it contains no synthesized speech.
-          </p>
-        ) : null}
-        {error ? <p className="text-sm text-red-700">{error}</p> : null}
-        <button
-          type="button"
-          onClick={() => void startPlayback()}
-          className="rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-white"
-        >
-          Begin session
-        </button>
-      </main>
+      <SessionField phase="alpha" className="items-center justify-center px-4 py-10">
+        <div className="session-column w-full max-w-md space-y-8">
+          <div className="text-center">
+            <Mark size={32} className="mx-auto mb-4" />
+            <h1 className="font-display text-2xl font-normal">Before you begin</h1>
+          </div>
+          <ul className="space-y-4 text-sm leading-relaxed text-[var(--session-mid)]">
+            <li>
+              Entrainment tones use rhythmic frequencies that may affect people with a history of
+              seizures or photosensitive epilepsy. Do not use this session if you have that history.
+            </li>
+            <li>Do not use PhaseShift while driving or operating machinery.</li>
+            <li>
+              PhaseShift is not a medical device and is not a substitute for professional medical or
+              mental health care.
+            </li>
+            <li>
+              Keep your screen on and leave this app in the foreground. v0 playback requires the
+              session screen to stay visible.
+            </li>
+          </ul>
+          {isTestGeneration ? (
+            <p className="rounded-[var(--radius)] border border-[var(--border-hair)] px-3 py-2 text-sm text-[var(--color-warning)]">
+              This is a test generation — it contains no synthesized speech.
+            </p>
+          ) : null}
+          {error ? <p className="text-sm text-[var(--color-error)]">{error}</p> : null}
+          <button
+            type="button"
+            onClick={() => void startPlayback()}
+            className="btn-sand w-full py-3 text-base"
+          >
+            Begin session
+          </button>
+        </div>
+      </SessionField>
     );
   }
 
@@ -705,36 +738,48 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
         ? Math.round((fetchProgress.loaded / fetchProgress.total) * 100)
         : 0;
     return (
-      <main className="mx-auto max-w-xl space-y-4 p-6">
-        <h1 className="text-xl font-semibold">Preparing audio</h1>
-        <p className="text-sm text-neutral-600">
-          Downloading segments {fetchProgress.loaded}/{fetchProgress.total} ({pct}%)
-        </p>
-        <div className="h-2 w-full rounded bg-neutral-200">
-          <div className="h-2 rounded bg-neutral-800" style={{ width: `${pct}%` }} />
+      <SessionField phase="alpha" className="items-center justify-center px-4 py-10">
+        <div className="session-column w-full max-w-md space-y-6 text-center">
+          <Mark size={40} className="loading-mark mx-auto" />
+          <h1 className="font-display text-xl font-normal">Preparing audio</h1>
+          <p className="text-sm text-[var(--session-mid)]">
+            Downloading segments {fetchProgress.loaded}/{fetchProgress.total} ({pct}%)
+          </p>
+          <div className="h-1 w-full overflow-hidden rounded-full bg-[var(--border-hair)]">
+            <div
+              className="h-full rounded-full bg-[var(--session-accent)] transition-all duration-300"
+              style={{ width: `${pct}%` }}
+            />
+          </div>
         </div>
-      </main>
+      </SessionField>
     );
   }
 
   if (stage === "readyToPlay") {
     return (
       <>
-        <main className={`mx-auto max-w-xl space-y-6 p-6 ${debugPad ? "pb-20" : ""}`}>
-          <h1 className="text-xl font-semibold">Ready to play</h1>
-          <p className="text-sm text-neutral-600">
-            Segments downloaded. Tap below to start audio — your browser requires a direct tap to
-            unlock sound.
-          </p>
-          {error ? <p className="text-sm text-red-700">{error}</p> : null}
-          <button
-            type="button"
-            onClick={() => void startAudio()}
-            className="w-full rounded bg-neutral-900 px-6 py-4 text-lg font-medium text-white"
-          >
-            Start audio
-          </button>
-        </main>
+        <SessionField
+          phase="alpha"
+          className={`items-center justify-center px-4 py-10 ${debugPad ? "pb-20" : ""}`}
+        >
+          <div className="session-column w-full max-w-md space-y-6 text-center">
+            <SessionPulse beatHz={initialBeatHz} />
+            <h1 className="font-display text-xl font-normal">Ready to play</h1>
+            <p className="text-sm text-[var(--session-mid)]">
+              Segments downloaded. Tap below to start audio — your browser requires a direct tap to
+              unlock sound.
+            </p>
+            {error ? <p className="text-sm text-[var(--color-error)]">{error}</p> : null}
+            <button
+              type="button"
+              onClick={() => void startAudio()}
+              className="btn-sand w-full py-4 text-base"
+            >
+              Start audio
+            </button>
+          </div>
+        </SessionField>
         {debugStrip}
       </>
     );
@@ -742,66 +787,77 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
 
   if (stage === "rating") {
     return (
-      <main className="mx-auto max-w-xl space-y-6 p-6">
-        <h1 className="text-xl font-semibold">How alert do you feel?</h1>
-        <p className="text-sm text-neutral-600">Rate your alertness from 1 (very drowsy) to 5 (fully alert).</p>
-        <div className="flex gap-2">
-          {[1, 2, 3, 4, 5].map((value) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => setExitAlertness(value)}
-              className={`h-10 w-10 rounded border text-sm ${
-                exitAlertness === value
-                  ? "border-neutral-900 bg-neutral-900 text-white"
-                  : "border-neutral-300"
-              }`}
-            >
-              {value}
-            </button>
-          ))}
+      <SessionField phase="gamma" className="items-center justify-center px-4 py-10">
+        <div className="session-column w-full max-w-md space-y-6">
+          <h1 className="font-display text-center text-xl font-normal">How alert do you feel?</h1>
+          <p className="text-center text-sm text-[var(--session-mid)]">
+            Rate your alertness from 1 (very drowsy) to 5 (fully alert).
+          </p>
+          <div className="flex justify-center gap-2">
+            {[1, 2, 3, 4, 5].map((value) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setExitAlertness(value)}
+                aria-label={`Alertness ${value}`}
+                className={`session-control h-11 w-11 ${
+                  exitAlertness === value
+                    ? "!border-[var(--session-accent)] !text-[var(--session-text)]"
+                    : ""
+                }`}
+              >
+                {value}
+              </button>
+            ))}
+          </div>
+          {error ? <p className="text-sm text-[var(--color-error)]">{error}</p> : null}
+          <button
+            type="button"
+            onClick={() => void submitRating()}
+            className="btn-sand w-full py-3"
+          >
+            Save and finish
+          </button>
         </div>
-        {error ? <p className="text-sm text-red-700">{error}</p> : null}
-        <button
-          type="button"
-          onClick={() => void submitRating()}
-          className="rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-white"
-        >
-          Save and finish
-        </button>
-      </main>
+      </SessionField>
     );
   }
 
   if (stage === "done") {
     return (
-      <main className="mx-auto max-w-xl space-y-4 p-6">
-        <h1 className="text-xl font-semibold">Session complete</h1>
-        <p className="text-sm text-neutral-600">Your exit alertness rating was saved.</p>
-      </main>
+      <SessionField phase="gamma" className="items-center justify-center px-4 py-10">
+        <div className="session-column w-full max-w-md space-y-4 text-center">
+          <Mark size={32} className="mx-auto" />
+          <h1 className="font-display text-xl font-normal">Session complete</h1>
+          <p className="text-sm text-[var(--session-mid)]">Your exit alertness rating was saved.</p>
+        </div>
+      </SessionField>
     );
   }
 
   return (
     <>
-      <main className={`mx-auto max-w-xl space-y-6 p-6 ${debugPad ? "pb-20" : ""}`}>
-        <header className="space-y-1">
-          <p className="text-xs uppercase tracking-wide text-neutral-500">Current phase</p>
-          <p className="text-2xl font-semibold capitalize">{currentPhase ?? "—"}</p>
-          <p className="text-sm text-neutral-600">
+      <SessionField phase={currentPhase} className={debugPad ? "pb-20" : ""}>
+        <div className="session-column flex flex-1 flex-col items-center justify-center px-4 py-6">
+          <PhaseJourney phases={phases} currentPhase={currentPhase} />
+          <SessionPulse beatHz={currentBeatHz} className="my-6 sm:my-8" />
+          <p className="font-display text-center text-3xl font-normal capitalize sm:text-4xl">
+            {currentPhase ?? "—"}
+          </p>
+          <p className="mt-2 text-sm text-[var(--session-mid)]">
             {formatTime(displayElapsedSec)} / {formatTime(totalSec)}
           </p>
-        </header>
+        </div>
 
-        <div className="space-y-3">
-          <div className="flex items-center gap-3">
+        <footer className="session-column space-y-4 px-4 pb-6 pt-2">
+          <div className="flex items-center gap-2">
             <button
               type="button"
               aria-label="Back 15 seconds"
               onClick={() => handleSeekRelative(-15)}
-              className="rounded border border-neutral-300 px-3 py-1.5 text-sm font-medium"
+              className="session-control shrink-0 px-3 py-2.5 text-sm"
             >
-              |&lt;-15s
+              −15s
             </button>
             <input
               type="range"
@@ -812,95 +868,100 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
               onPointerDown={handleScrubStart}
               onChange={(event) => handleScrubChange(Number(event.target.value))}
               onPointerUp={(event) => void handleScrubEnd(Number(event.currentTarget.value))}
-              className="w-full"
+              className="session-scrub w-full"
               aria-label="Session scrub bar"
             />
             <button
               type="button"
               aria-label="Forward 15 seconds"
               onClick={() => handleSeekRelative(15)}
-              className="rounded border border-neutral-300 px-3 py-1.5 text-sm font-medium"
+              className="session-control shrink-0 px-3 py-2.5 text-sm"
             >
-              +15s-&gt;|
+              +15s
             </button>
           </div>
           {showForwardSeekHint ? (
-            <p className="text-xs text-neutral-500">
+            <p className="text-center text-xs text-[var(--session-mid)]">
               Skipping ahead may reduce the induction effect.
             </p>
           ) : null}
-        </div>
 
-        <div className="space-y-4 rounded border border-neutral-200 p-4">
           <div className="flex gap-2">
             <button
               type="button"
               onClick={() => void togglePause()}
-              className="rounded border border-neutral-300 px-3 py-1.5 text-sm"
+              className="session-control flex-1 py-3 text-sm"
             >
               {stage === "paused" ? "Resume" : "Pause"}
             </button>
             <button
               type="button"
               onClick={() => void handleEnd()}
-              className="rounded border border-neutral-300 px-3 py-1.5 text-sm"
+              className="session-control flex-1 py-3 text-sm"
             >
               End session
             </button>
           </div>
 
-          <label className="block text-sm">
-            Voice volume
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.01}
-              value={voiceGain}
-              onChange={(event) => handleVoiceGain(Number(event.target.value))}
-              className="mt-1 w-full"
-            />
-          </label>
+          <details className="session-panel text-sm text-[var(--session-mid)]">
+            <summary className="cursor-pointer px-4 py-3 text-[var(--session-text)]">
+              Session settings
+            </summary>
+            <div className="space-y-4 border-t border-[var(--border-hair)] px-4 py-4">
+              <label className="block">
+                <span className="mb-2 block">Voice volume</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={voiceGain}
+                  onChange={(event) => handleVoiceGain(Number(event.target.value))}
+                  className="session-scrub w-full"
+                  aria-label="Voice volume"
+                />
+              </label>
 
-          <label className="block text-sm">
-            Tone volume
-            <input
-              type="range"
-              min={0}
-              max={0.5}
-              step={0.01}
-              value={toneGain}
-              onChange={(event) => handleToneGain(Number(event.target.value))}
-              className="mt-1 w-full"
-            />
-          </label>
+              <label className="block">
+                <span className="mb-2 block">Tone volume</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={0.5}
+                  step={0.01}
+                  value={toneGain}
+                  onChange={(event) => handleToneGain(Number(event.target.value))}
+                  className="session-scrub w-full"
+                  aria-label="Tone volume"
+                />
+              </label>
 
-          <fieldset className="space-y-2 text-sm">
-            <legend className="font-medium">Entrainment mode</legend>
-            <label className="flex items-center gap-2">
-              <input
-                type="radio"
-                name="mode"
-                checked={mode === "isochronic"}
-                onChange={() => handleModeChange("isochronic")}
-              />
-              Isochronic (speakers OK)
-            </label>
-            <label className="flex items-center gap-2">
-              <input
-                type="radio"
-                name="mode"
-                checked={mode === "binaural"}
-                onChange={() => handleModeChange("binaural")}
-              />
-              Binaural (requires headphones)
-            </label>
-          </fieldset>
-        </div>
+              <fieldset className="space-y-2">
+                <legend className="text-[var(--session-text)]">Entrainment mode</legend>
+                <ChoiceControl
+                  name="mode"
+                  checked={mode === "isochronic"}
+                  onChange={() => handleModeChange("isochronic")}
+                >
+                  Isochronic (speakers OK)
+                </ChoiceControl>
+                <ChoiceControl
+                  name="mode"
+                  checked={mode === "binaural"}
+                  onChange={() => handleModeChange("binaural")}
+                >
+                  Binaural (requires headphones)
+                </ChoiceControl>
+              </fieldset>
+            </div>
+          </details>
 
-        {error ? <p className="text-sm text-red-700">{error}</p> : null}
-        <p className="text-xs text-neutral-500">Keep this screen visible for uninterrupted playback.</p>
-      </main>
+          {error ? <p className="text-center text-sm text-[var(--color-error)]">{error}</p> : null}
+          <p className="text-center text-xs text-[var(--session-mid)]">
+            Keep this screen visible for uninterrupted playback.
+          </p>
+        </footer>
+      </SessionField>
       {debugStrip}
     </>
   );
