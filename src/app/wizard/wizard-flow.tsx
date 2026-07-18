@@ -154,6 +154,14 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
         <p className="step-eyebrow">
           Step {String(step).padStart(2, "0")} / {String(STEP_COUNT).padStart(2, "0")}
         </p>
+        <div className="wizard-progress" aria-hidden>
+          {Array.from({ length: STEP_COUNT }, (_, index) => {
+            const tick = index + 1;
+            const state =
+              tick < step ? "wizard-tick-done" : tick === step ? "wizard-tick-current" : "";
+            return <span key={tick} className={`wizard-tick ${state}`.trim()} />;
+          })}
+        </div>
         <h1 className="font-display text-2xl font-normal text-[var(--text-hi)]">
           {WIZARD_STEP_COPY[step]!.heading}
         </h1>

@@ -1,11 +1,15 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { Mark } from "@/components/mark";
 import { SetupHeader } from "@/components/setup-header";
 import { getSessionUser } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
+import {
+  synthesisProvenanceBadge,
+  type ScriptSynthesisSource,
+} from "@/lib/synthesis/provenance";
 import { DevGoldenScriptButton } from "./dev-golden-script-button";
 import { NewScriptButton } from "./new-script-button";
-import { synthesisProvenanceBadge } from "@/lib/synthesis/provenance";
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleString(undefined, {
@@ -24,6 +28,16 @@ function formatDuration(sec: number | null): string {
 
 function formatStatus(status: string): string {
   return status.replace(/_/g, " ");
+}
+
+type RowAccent = "sand" | "clay" | "muted";
+
+function rowAccentFor(
+  script: ScriptSynthesisSource & { status: string },
+): RowAccent {
+  if (script.status === "failed") return "muted";
+  if (script.voice_profile_id) return "sand";
+  return "clay";
 }
 
 export default async function ScriptsPage() {
@@ -54,7 +68,8 @@ export default async function ScriptsPage() {
       <SetupHeader />
       <main className="mx-auto max-w-3xl space-y-8 px-4 py-8 sm:px-6">
         <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
-          <h1 className="font-display text-2xl font-normal text-[var(--text-hi)]">
+          <h1 className="flex items-center gap-2.5 font-display text-2xl font-normal text-[var(--text-hi)]">
+            <Mark size={22} />
             Your sessions
           </h1>
           <div className="flex flex-col gap-2 sm:items-end">
@@ -65,37 +80,43 @@ export default async function ScriptsPage() {
 
         {scripts && scripts.length > 0 ? (
           <ul className="overflow-hidden rounded-[var(--radius)] border border-[var(--setup-border)]">
-            {scripts.map((script) => (
-              <li key={script.id} className="list-row">
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="truncate text-sm font-medium text-[var(--text-hi)]">
-                      {script.id}
+            {scripts.map((script) => {
+              const accent = rowAccentFor(script);
+              return (
+                <li key={script.id} className={`list-row list-row-accent-${accent}`}>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="truncate text-sm font-medium text-[var(--text-hi)]">
+                        {script.id}
+                      </p>
+                      <span className="provider-badge">{synthesisProvenanceBadge(script)}</span>
+                    </div>
+                    <p className={`mt-1 text-sm list-row-status-${accent}`}>
+                      {formatStatus(script.status)}
+                      {script.total_duration_sec != null
+                        ? ` · ${formatDuration(script.total_duration_sec)}`
+                        : ""}
+                      {" · "}
+                      <span className="text-[var(--text-mid)]">{formatDate(script.created_at)}</span>
                     </p>
-                    <span className="provider-badge">{synthesisProvenanceBadge(script)}</span>
                   </div>
-                  <p className="mt-1 text-sm text-[var(--text-mid)]">
-                    {formatStatus(script.status)}
-                    {script.total_duration_sec != null
-                      ? ` · ${formatDuration(script.total_duration_sec)}`
-                      : ""}
-                    {" · "}
-                    {formatDate(script.created_at)}
-                  </p>
-                </div>
-                <div className="shrink-0">
-                  {script.status === "ready" ? (
-                    <Link href={`/session/${script.id}`} className="btn-clay px-4 py-1.5 text-sm">
-                      Play
-                    </Link>
-                  ) : (
-                    <Link href={`/dev/scripts/${script.id}`} className="btn-ghost px-4 py-1.5 text-sm">
-                      Status
-                    </Link>
-                  )}
-                </div>
-              </li>
-            ))}
+                  <div className="shrink-0">
+                    {script.status === "ready" ? (
+                      <Link href={`/session/${script.id}`} className="btn-clay px-4 py-1.5 text-sm">
+                        Play
+                      </Link>
+                    ) : (
+                      <Link
+                        href={`/dev/scripts/${script.id}`}
+                        className="btn-ghost px-4 py-1.5 text-sm"
+                      >
+                        Status
+                      </Link>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         ) : (
           <p className="text-sm text-[var(--text-mid)]">
