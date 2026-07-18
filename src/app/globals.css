@@ -27,15 +27,16 @@
     font-family: var(--font-body);
   }
 
-  /* Setup context — warm dark ground */
+  /* Setup context — indigo ground (static; warmth lives in accents only) */
   .setup-ground {
     min-height: 100dvh;
     color: var(--text-hi);
     background-color: var(--setup-bg);
     background-image: radial-gradient(
-      ellipse 90% 55% at 50% 0%,
-      color-mix(in srgb, var(--setup-accent) 5%, transparent) 0%,
-      transparent 60%
+      ellipse 120% 75% at 50% 0%,
+      color-mix(in srgb, var(--setup-field-center) 70%, var(--setup-bg)) 0%,
+      color-mix(in srgb, var(--setup-field-mid) 70%, var(--setup-bg)) 42%,
+      var(--setup-bg) 100%
     );
   }
 
@@ -54,7 +55,7 @@
     width: 100%;
     border-radius: var(--radius);
     border: 1px solid transparent;
-    background-color: color-mix(in srgb, var(--setup-panel) 90%, #ece7db);
+    background-color: color-mix(in srgb, var(--setup-panel) 82%, #ece7db);
     box-shadow: inset 0 0 0 1px var(--border-hair);
     color: var(--text-hi);
     padding: 0.625rem 0.75rem;

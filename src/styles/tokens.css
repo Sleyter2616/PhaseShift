@@ -6,16 +6,19 @@
   /* Shared palette */
   --accent-sand: #e6b98f;
   --text-hi: #ece7db;
-  --text-mid: #8a8578;
-  --text-lo: #5f5d55;
+  /* Cooler mid/lo for AA against indigo panels (#1b2436) */
+  --text-mid: #9aa3b5;
+  --text-lo: #808ba0;
   --border-hair: rgba(255, 255, 255, 0.08);
   --radius: 8px;
 
-  /* Setup context (login, wizard, home) */
+  /* Setup context (login, wizard, home) — indigo family */
   --setup-bg: #141026;
-  --setup-panel: #17161f;
+  --setup-panel: #1b2436;
   --setup-accent: #c96a3a;
-  --setup-border: #2a2833;
+  --setup-border: #2c3450;
+  --setup-field-center: #3a3566;
+  --setup-field-mid: #241f42;
 
   /* Session context (player) */
   --session-bg-center: #3a3566;
