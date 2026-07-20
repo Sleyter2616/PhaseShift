@@ -4,6 +4,8 @@ Reality-engineering meditation app — guided self-hypnosis with per-segment TTS
 
 See the full execution plan in [`docs/blueprint.md`](docs/blueprint.md).
 
+**Production deploy:** see [`DEPLOY.md`](DEPLOY.md) (Vercel env vars, Supabase auth URLs, Inngest Cloud, Stripe live webhook). Do not deploy from this README — connect Vercel manually.
+
 ## Stack
 
 - **Runtime:** Next.js 15 (App Router), React 19, TypeScript (strict), Zod
@@ -39,7 +41,9 @@ Copy `.env.example` to `.env.local` and fill in:
 | `TTS_PROVIDER` | `elevenlabs` (default) or `selfhost` for zero ElevenLabs spend |
 | `LLM_MODEL` | Default `claude-sonnet-4-6` |
 | `DEV_USER_PASSWORD` | Optional; seed script sets dev user password (printed if unset) |
-| `INNGEST_EVENT_KEY` / `INNGEST_SIGNING_KEY` | Inngest Cloud (optional for local dev) |
+| `INNGEST_DEV` | Set to `1` for local Dev Server; **unset in prod** |
+| `INNGEST_EVENT_KEY` / `INNGEST_SIGNING_KEY` | Inngest Cloud (**prod-only**; leave empty locally when `INNGEST_DEV=1`) |
+| `STRIPE_*` | Test keys locally; **live** keys + Price IDs in prod (see [`DEPLOY.md`](DEPLOY.md)) |
 
 ## Local development
 
@@ -54,7 +58,7 @@ pnpm typecheck && pnpm lint && pnpm test
 
 ### 2. Apply migrations
 
-Apply `supabase/migrations/0001` through `0008` on your hosted Supabase project (including `0007_auth.sql` for the signup profile trigger and `refund_credits`, and `0008_voice_bucket.sql` for the `voice-samples` storage bucket).
+Apply `supabase/migrations/0001` through `0010` on your hosted Supabase project (including `0007_auth.sql` for the signup profile trigger and `refund_credits`, `0008_voice_bucket.sql` for the `voice-samples` storage bucket, `0009_billing.sql`, and `0010_lock_trigger_fn.sql`).
 
 ### 3. Seed dev user
 
@@ -67,12 +71,14 @@ Sign in at `http://localhost:3000/login` with `dev@phaseshift.local` and the pri
 ### 4. Start services (two terminals)
 
 ```bash
-# Terminal A — Next.js
+# Terminal A — Next.js (ensure INNGEST_DEV=1 in .env.local)
 pnpm dev
 
-# Terminal B — Inngest dev server
+# Terminal B — Inngest Dev Server
 npx inngest-cli@latest dev -u http://localhost:3000/api/inngest
 ```
+
+With `INNGEST_DEV=1`, the app talks to the local Dev Server and does not need `INNGEST_EVENT_KEY` / `INNGEST_SIGNING_KEY`. In production those keys are required and `INNGEST_DEV` must be unset — see [`DEPLOY.md`](DEPLOY.md).
 
 ### 5. Sign in and browse scripts
 
@@ -196,7 +202,9 @@ Open `https://<your-lan-ip>:3000/session/<script_id>` and keep the screen in the
 src/
   app/api/scripts/        POST intake (auth + spend_credits), GET manifest
   app/api/voice/          POST voice sample upload + clone (auth, FormData)
-  app/api/inngest/        Inngest serve endpoint
+  app/api/inngest/        Inngest serve endpoint (force-dynamic, Vercel serverless)
+  app/api/webhooks/stripe Stripe webhook (force-dynamic)
+  app/billing/            Checkout / portal UI
   app/login/              Sign-in / sign-up
   app/scripts/            User's script list (RLS-scoped)
   app/wizard/             7-step intake wizard (v0: 40 min locked)
@@ -206,6 +214,7 @@ src/
   lib/supabase/           @supabase/ssr browser/server/middleware clients
   lib/auth/               Session helpers, ownership checks
   lib/audio/              EntrainmentEngine, scheduler, JIT decode window
+  lib/billing/            Plans, Stripe client, webhook fulfillment
   lib/playback/           Shared manifest loader
   inngest/functions/      generate-script, synthesize-segment
   lib/compiler/           Claude compile + retry
@@ -213,8 +222,12 @@ src/
   lib/pipeline/           segment derivation, dedupe, reconcile
   lib/tts/                ElevenLabs + selfhost providers
 scripts/                  seed, rls-e2e, credits-concurrency, verify
-supabase/migrations/      0001–0008
+supabase/migrations/      0001–0010
 ```
+
+## Deploy
+
+See **[`DEPLOY.md`](DEPLOY.md)** for the full production checklist (Vercel env list, Supabase Site URL / redirects, Inngest app connection, Stripe live webhook). This repo does not auto-deploy.
 
 ## Roadmap
 

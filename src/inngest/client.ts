@@ -1,6 +1,21 @@
 import { Inngest } from "inngest";
 
-export const inngest = new Inngest({ id: "phaseshift" });
+/**
+ * Cloud mode (default): uses INNGEST_EVENT_KEY + INNGEST_SIGNING_KEY from env.
+ * Dev mode only when INNGEST_DEV=1 (local Inngest Dev Server; no signing keys).
+ */
+const isDev = process.env.INNGEST_DEV === "1";
+
+export const inngest = new Inngest({
+  id: "phaseshift",
+  isDev,
+  ...(isDev
+    ? {}
+    : {
+        eventKey: process.env.INNGEST_EVENT_KEY,
+        signingKey: process.env.INNGEST_SIGNING_KEY,
+      }),
+});
 
 export type ScriptGenerateRequested = {
   name: "script/generate.requested";
