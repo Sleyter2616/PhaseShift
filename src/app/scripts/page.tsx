@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Mark } from "@/components/mark";
 import { SetupHeader } from "@/components/setup-header";
+import { needsOnboarding } from "@/lib/auth/onboarding";
 import { getSessionUser } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -43,6 +44,7 @@ function rowAccentFor(
 export default async function ScriptsPage() {
   const user = await getSessionUser();
   if (!user) redirect("/login");
+  if (await needsOnboarding(user.id)) redirect("/welcome");
 
   const supabase = await createClient();
   const { data: scripts, error } = await supabase

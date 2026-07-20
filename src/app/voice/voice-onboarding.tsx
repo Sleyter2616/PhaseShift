@@ -247,7 +247,13 @@ export function VoiceOnboarding({
             onChange={(event) => setConsentChecked(event.target.checked)}
             className="mt-1"
           />
-          I confirm this is my own voice and I consent to in-app cloning for my account.
+          <span>
+            I confirm this is my own voice and I consent to in-app cloning for my account. See{" "}
+            <a href="/voice-consent" className="underline underline-offset-2" target="_blank" rel="noreferrer">
+              voice consent
+            </a>
+            .
+          </span>
         </label>
         {consentError ? <p className="text-sm text-red-700">{consentError}</p> : null}
         <button

@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "PhaseShift",
-  description: "Reality-engineering meditation app",
+  description: "A guided practice built on a proprietary protocol — personal, precise, deliberate.",
 };
 
 export default function RootLayout({

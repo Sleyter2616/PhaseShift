@@ -1,11 +1,15 @@
+import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { Mark } from "@/components/mark";
+import { resolvePostAuthPath } from "@/lib/auth/onboarding";
 import { getSessionUser } from "@/lib/auth/session";
 import { LoginForm } from "./login-form";
 
 export default async function LoginPage() {
   const user = await getSessionUser();
-  if (user) redirect("/scripts");
+  if (user) {
+    redirect(await resolvePostAuthPath(user.id));
+  }
 
   return (
     <main className="setup-ground flex min-h-dvh flex-col items-center justify-center px-4 py-8">
@@ -13,9 +17,11 @@ export default async function LoginPage() {
         <div className="flex flex-col items-center gap-3 text-center">
           <Mark size={36} labeled />
           <h1 className="font-display text-2xl font-normal text-[var(--text-hi)]">PhaseShift</h1>
-          <p className="text-sm text-[var(--text-mid)]">Sign in to continue</p>
+          <p className="text-sm text-[var(--text-mid)]">Sign in or create an account</p>
         </div>
-        <LoginForm />
+        <Suspense fallback={<p className="text-sm text-[var(--text-mid)]">Loading…</p>}>
+          <LoginForm />
+        </Suspense>
       </div>
     </main>
   );
