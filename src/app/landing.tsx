@@ -100,6 +100,9 @@ export function LandingPage() {
           <Link href="/terms" className="transition-colors hover:text-[var(--text-mid)]">
             Terms
           </Link>
+          <Link href="/cookies" className="transition-colors hover:text-[var(--text-mid)]">
+            Cookies
+          </Link>
           <Link href="/voice-consent" className="transition-colors hover:text-[var(--text-mid)]">
             Voice consent
           </Link>

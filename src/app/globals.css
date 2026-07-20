@@ -197,11 +197,75 @@
     color: var(--text-hi);
   }
 
-  .legal-placeholder-banner {
-    border-radius: var(--radius);
-    border: 1px solid var(--color-warning);
-    background-color: color-mix(in srgb, var(--color-warning) 12%, transparent);
-    color: var(--color-warning);
+  /* Termly HTML on setup-ground — force readable dark tokens over export colors */
+  .legal-termly {
+    color: var(--text-mid);
+    font-size: 0.9375rem;
+    line-height: 1.65;
+    overflow-wrap: anywhere;
+  }
+
+  .legal-termly [data-custom-class="title"],
+  .legal-termly [data-custom-class="subtitle"] {
+    display: none !important;
+  }
+
+  .legal-termly,
+  .legal-termly [data-custom-class="body"],
+  .legal-termly [data-custom-class="body"] *,
+  .legal-termly [data-custom-class="body_text"],
+  .legal-termly [data-custom-class="body_text"] *,
+  .legal-termly span,
+  .legal-termly p,
+  .legal-termly li,
+  .legal-termly td,
+  .legal-termly th,
+  .legal-termly div {
+    color: var(--text-mid) !important;
+    background-color: transparent !important;
+  }
+
+  .legal-termly h1,
+  .legal-termly h2,
+  .legal-termly h3,
+  .legal-termly h4,
+  .legal-termly [data-custom-class="heading_1"],
+  .legal-termly [data-custom-class="heading_1"] *,
+  .legal-termly [data-custom-class="heading_2"],
+  .legal-termly [data-custom-class="heading_2"] *,
+  .legal-termly [data-custom-class="heading_3"],
+  .legal-termly [data-custom-class="heading_3"] *,
+  .legal-termly strong,
+  .legal-termly b {
+    color: var(--text-hi) !important;
+    background-color: transparent !important;
+  }
+
+  .legal-termly h1,
+  .legal-termly h2,
+  .legal-termly h3,
+  .legal-termly h4 {
+    font-family: var(--font-display), Georgia, serif !important;
+  }
+
+  .legal-termly a,
+  .legal-termly a *,
+  .legal-termly [data-custom-class="link"],
+  .legal-termly [data-custom-class="link"] * {
+    color: var(--accent-sand) !important;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .legal-termly table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .legal-termly th,
+  .legal-termly td {
+    border: 1px solid var(--setup-border) !important;
+    padding: 0.5rem 0.75rem;
   }
 
   .land-hero {
