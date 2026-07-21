@@ -13,6 +13,15 @@ export function normalizeTermlyHtml(raw: string): string {
     /<span\s+style="display:\s*block;margin:\s*0\s+auto\s+3\.125rem;[\s\S]*?<\/span>/i,
     "",
   );
+  // Drop inline color/background so our dark-theme CSS wins cleanly
+  html = html.replace(/\sstyle="([^"]*)"/gi, (_match, styles: string) => {
+    const cleaned = styles
+      .split(";")
+      .map((part) => part.trim())
+      .filter((part) => part.length > 0 && !/^(color|background(-color)?)\s*:/i.test(part))
+      .join("; ");
+    return cleaned ? ` style="${cleaned}"` : "";
+  });
   return html.trim();
 }
 
