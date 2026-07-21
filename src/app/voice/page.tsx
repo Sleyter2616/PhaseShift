@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
-import { AuthHeader } from "@/components/auth-header";
+import { SetupHeader } from "@/components/setup-header";
+import { SiteFooter } from "@/components/site-footer";
 import { getSessionUser } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -39,10 +40,10 @@ export default async function VoicePage() {
   const canRetryStoredSample = hasStoredSample && status === "failed";
 
   return (
-    <>
-      <AuthHeader />
-      <main className="mx-auto max-w-2xl space-y-4 p-6">
-        <h1 className="text-2xl font-semibold">Voice onboarding</h1>
+    <div className="setup-ground flex min-h-dvh flex-col">
+      <SetupHeader />
+      <main className="mx-auto w-full max-w-2xl flex-1 space-y-4 px-4 py-8 sm:px-6">
+        <h1 className="font-display text-2xl text-[var(--text-hi)]">Voice onboarding</h1>
         <VoiceOnboarding
           status={status}
           consentConfirmed={Boolean(profile?.consent_confirmed_at)}
@@ -50,6 +51,7 @@ export default async function VoicePage() {
           canRetryStoredSample={canRetryStoredSample}
         />
       </main>
-    </>
+      <SiteFooter />
+    </div>
   );
 }

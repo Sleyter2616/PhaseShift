@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
-import { AuthHeader } from "@/components/auth-header";
+import { SetupHeader } from "@/components/setup-header";
+import { SiteFooter } from "@/components/site-footer";
 import { MINUTE_TIERS } from "@/lib/billing/minutes";
 import { getSessionUser } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
@@ -25,12 +26,13 @@ export default async function BillingPage() {
 
   if (error) {
     return (
-      <>
-        <AuthHeader />
-        <main className="mx-auto max-w-3xl p-6">
-          <p className="text-sm text-red-700">Failed to load billing: {error.message}</p>
+      <div className="setup-ground flex min-h-dvh flex-col">
+        <SetupHeader />
+        <main className="mx-auto max-w-3xl flex-1 px-4 py-8 sm:px-6">
+          <p className="text-error">Failed to load billing: {error.message}</p>
         </main>
-      </>
+        <SiteFooter />
+      </div>
     );
   }
 
@@ -43,49 +45,56 @@ export default async function BillingPage() {
   const topupMinutes = Number(profile?.topup_minutes ?? 0);
 
   return (
-    <>
-      <AuthHeader />
-      <main className="mx-auto max-w-3xl space-y-6 p-6">
-        <h1 className="text-2xl font-semibold">Billing</h1>
+    <div className="setup-ground flex min-h-dvh flex-col">
+      <SetupHeader />
+      <main className="mx-auto w-full max-w-3xl flex-1 space-y-6 px-4 py-8 sm:px-6">
+        <h1 className="font-display text-2xl text-[var(--text-hi)]">Billing</h1>
 
-        <section className="rounded border border-neutral-200 p-4">
-          <h2 className="text-sm font-medium text-neutral-500">Minutes balance</h2>
+        <section className="rounded-[var(--radius)] border border-[var(--setup-border)] bg-[var(--setup-panel)] p-4">
+          <h2 className="text-sm font-medium text-[var(--text-lo)]">Minutes balance</h2>
           <dl className="mt-3 grid gap-3 sm:grid-cols-3">
             <div>
-              <dt className="text-xs text-neutral-500">Subscription</dt>
-              <dd className="text-2xl font-semibold tabular-nums">{subscriptionMinutes}</dd>
+              <dt className="text-xs text-[var(--text-lo)]">Subscription</dt>
+              <dd className="text-2xl font-semibold tabular-nums text-[var(--text-hi)]">
+                {subscriptionMinutes}
+              </dd>
             </div>
             <div>
-              <dt className="text-xs text-neutral-500">Top-up</dt>
-              <dd className="text-2xl font-semibold tabular-nums">{topupMinutes}</dd>
+              <dt className="text-xs text-[var(--text-lo)]">Top-up</dt>
+              <dd className="text-2xl font-semibold tabular-nums text-[var(--text-hi)]">
+                {topupMinutes}
+              </dd>
             </div>
             <div>
-              <dt className="text-xs text-neutral-500">Total</dt>
-              <dd className="text-2xl font-semibold tabular-nums">
+              <dt className="text-xs text-[var(--text-lo)]">Total</dt>
+              <dd className="text-2xl font-semibold tabular-nums text-[var(--text-hi)]">
                 {subscriptionMinutes + topupMinutes}
               </dd>
             </div>
           </dl>
-          <p className="mt-3 text-sm text-neutral-600">
-            Subscription minutes reset {formatPeriodEnd(profile?.subscription_minutes_reset_at ?? null)}
-            . Top-up minutes never expire.
+          <p className="mt-3 text-sm text-[var(--text-mid)]">
+            Subscription minutes reset{" "}
+            {formatPeriodEnd(profile?.subscription_minutes_reset_at ?? null)}. Top-up minutes never
+            expire.
           </p>
         </section>
 
-        <section className="rounded border border-neutral-200 p-4">
-          <h2 className="text-sm font-medium text-neutral-500">Subscription</h2>
+        <section className="rounded-[var(--radius)] border border-[var(--setup-border)] bg-[var(--setup-panel)] p-4">
+          <h2 className="text-sm font-medium text-[var(--text-lo)]">Subscription</h2>
           <dl className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
             <div>
-              <dt className="text-neutral-500">Status</dt>
-              <dd className="font-medium capitalize">{profile?.subscription_status ?? "none"}</dd>
+              <dt className="text-[var(--text-lo)]">Status</dt>
+              <dd className="font-medium capitalize text-[var(--text-hi)]">
+                {profile?.subscription_status ?? "none"}
+              </dd>
             </div>
             <div>
-              <dt className="text-neutral-500">Tier</dt>
-              <dd className="font-medium">{tierLabel}</dd>
+              <dt className="text-[var(--text-lo)]">Tier</dt>
+              <dd className="font-medium text-[var(--text-hi)]">{tierLabel}</dd>
             </div>
             <div>
-              <dt className="text-neutral-500">Current period ends</dt>
-              <dd className="font-medium">
+              <dt className="text-[var(--text-lo)]">Current period ends</dt>
+              <dd className="font-medium text-[var(--text-hi)]">
                 {formatPeriodEnd(profile?.subscription_current_period_end ?? null)}
               </dd>
             </div>
@@ -94,6 +103,7 @@ export default async function BillingPage() {
 
         <BillingActions subscriptionStatus={profile?.subscription_status ?? "none"} />
       </main>
-    </>
+      <SiteFooter />
+    </div>
   );
 }

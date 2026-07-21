@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Mark } from "@/components/mark";
+import { SiteFooter } from "@/components/site-footer";
 
 export function LegalDocument({
   title,
@@ -11,8 +12,8 @@ export function LegalDocument({
   html: string;
 }) {
   return (
-    <main className="setup-ground min-h-dvh">
-      <div className="mx-auto max-w-3xl px-6 py-12 sm:px-8">
+    <main className="setup-ground flex min-h-dvh flex-col">
+      <div className="mx-auto w-full max-w-3xl flex-1 px-6 py-12 sm:px-8">
         <Link href="/" className="mb-8 flex w-fit items-center gap-2">
           <Mark size={22} />
           <span className="font-display text-lg text-[var(--text-hi)]">PhaseShift</span>
@@ -37,6 +38,7 @@ export function LegalDocument({
           </Link>
         </p>
       </div>
+      <SiteFooter />
     </main>
   );
 }
