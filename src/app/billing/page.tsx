@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { AuthHeader } from "@/components/auth-header";
-import { SUBSCRIPTION_TIERS } from "@/lib/billing/plans";
+import { MINUTE_TIERS } from "@/lib/billing/minutes";
 import { getSessionUser } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { BillingActions } from "./billing-actions";
@@ -18,7 +18,7 @@ export default async function BillingPage() {
   const { data: profile, error } = await supabase
     .from("profiles")
     .select(
-      "credit_balance, subscription_status, subscription_tier, subscription_current_period_end",
+      "subscription_minutes, topup_minutes, subscription_minutes_reset_at, subscription_status, subscription_tier, subscription_current_period_end",
     )
     .eq("id", user.id)
     .single();
@@ -35,10 +35,12 @@ export default async function BillingPage() {
   }
 
   const tierLabel =
-    profile?.subscription_tier &&
-    profile.subscription_tier in SUBSCRIPTION_TIERS
-      ? SUBSCRIPTION_TIERS[profile.subscription_tier as keyof typeof SUBSCRIPTION_TIERS].label
+    profile?.subscription_tier && profile.subscription_tier in MINUTE_TIERS
+      ? MINUTE_TIERS[profile.subscription_tier as keyof typeof MINUTE_TIERS].label
       : "None";
+
+  const subscriptionMinutes = Number(profile?.subscription_minutes ?? 0);
+  const topupMinutes = Number(profile?.topup_minutes ?? 0);
 
   return (
     <>
@@ -47,9 +49,26 @@ export default async function BillingPage() {
         <h1 className="text-2xl font-semibold">Billing</h1>
 
         <section className="rounded border border-neutral-200 p-4">
-          <h2 className="text-sm font-medium text-neutral-500">Credit balance</h2>
-          <p className="mt-1 text-3xl font-semibold tabular-nums">
-            {profile?.credit_balance ?? 0}
+          <h2 className="text-sm font-medium text-neutral-500">Minutes balance</h2>
+          <dl className="mt-3 grid gap-3 sm:grid-cols-3">
+            <div>
+              <dt className="text-xs text-neutral-500">Subscription</dt>
+              <dd className="text-2xl font-semibold tabular-nums">{subscriptionMinutes}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-neutral-500">Top-up</dt>
+              <dd className="text-2xl font-semibold tabular-nums">{topupMinutes}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-neutral-500">Total</dt>
+              <dd className="text-2xl font-semibold tabular-nums">
+                {subscriptionMinutes + topupMinutes}
+              </dd>
+            </div>
+          </dl>
+          <p className="mt-3 text-sm text-neutral-600">
+            Subscription minutes reset {formatPeriodEnd(profile?.subscription_minutes_reset_at ?? null)}
+            . Top-up minutes never expire.
           </p>
         </section>
 

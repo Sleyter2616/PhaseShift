@@ -25,7 +25,8 @@
     "script:dump": "tsx scripts/script-dump.ts",
     "tts:sample": "tsx scripts/tts-sample.ts",
     "tts:matrix": "tsx scripts/tts-matrix.ts",
-    "billing:sim": "tsx scripts/billing-sim.ts"
+    "billing:sim": "tsx scripts/billing-sim.ts",
+    "minutes:billing:sim": "tsx scripts/minutes-billing-sim.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",

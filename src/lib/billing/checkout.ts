@@ -1,11 +1,12 @@
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import {
   appBaseUrl,
+  MINUTE_TIERS,
   stripePriceIdForTier,
   stripeTopupPriceId,
-  TOP_UP,
-  type SubscriptionTierId,
-} from "./plans";
+  TOPUP_MINUTES,
+  type MinutesTierId,
+} from "./minutes";
 import { getStripeClient } from "./stripe-client";
 
 export type CheckoutKind = "topup" | "subscribe";
@@ -42,7 +43,7 @@ export async function createCheckoutSession(input: {
   supabase: SupabaseClient;
   user: User;
   kind: CheckoutKind;
-  tier?: SubscriptionTierId;
+  tier?: MinutesTierId;
 }): Promise<string> {
   const customerId = await ensureStripeCustomer(input.supabase, input.user);
   const stripe = getStripeClient();
@@ -58,7 +59,7 @@ export async function createCheckoutSession(input: {
       metadata: {
         user_id: input.user.id,
         kind: "topup",
-        credits: String(TOP_UP.credits),
+        minutes: String(TOPUP_MINUTES.minutes),
       },
     });
     if (!session.url) throw new Error("checkout session missing url");
@@ -76,6 +77,7 @@ export async function createCheckoutSession(input: {
       user_id: input.user.id,
       kind: "subscribe",
       tier: input.tier,
+      monthly_minutes: String(MINUTE_TIERS[input.tier].monthlyMinutes),
     },
   });
   if (!session.url) throw new Error("checkout session missing url");

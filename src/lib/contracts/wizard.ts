@@ -19,6 +19,8 @@ export interface WizardDraft {
     aos_layer?: "ego" | "self" | "persona" | "shadow";
   };
   voice_profile_id: string | null;
+  /** Selected ElevenLabs stock voice id when not using own voice. */
+  stock_voice_id: string | null;
 }
 
 export const EMPTY_WIZARD_DRAFT: WizardDraft = {
@@ -35,6 +37,7 @@ export const EMPTY_WIZARD_DRAFT: WizardDraft = {
     senses_emphasis: ["sight", "touch"],
   },
   voice_profile_id: null,
+  stock_voice_id: null,
 };
 
 function stepPayload(step: number, draft: WizardDraft): unknown {

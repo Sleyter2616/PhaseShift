@@ -1,10 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { SUBSCRIPTION_TIERS, TOP_UP } from "@/lib/billing/plans";
+import { MINUTE_TIERS, TOPUP_MINUTES, type MinutesTierId } from "@/lib/billing/minutes";
 
 type CheckoutKind = "topup" | "subscribe";
-type SubscriptionTierId = keyof typeof SUBSCRIPTION_TIERS;
 
 async function postBilling(path: string, body?: unknown): Promise<string> {
   const response = await fetch(path, {
@@ -29,7 +28,7 @@ export function BillingActions({
   const [error, setError] = useState<string | null>(null);
   const subscribed = subscriptionStatus === "active" || subscriptionStatus === "past_due";
 
-  async function startCheckout(kind: CheckoutKind, tier?: SubscriptionTierId) {
+  async function startCheckout(kind: CheckoutKind, tier?: MinutesTierId) {
     const key = tier ? `${kind}:${tier}` : kind;
     setPending(key);
     setError(null);
@@ -65,10 +64,10 @@ export function BillingActions({
         >
           {pending === "topup"
             ? "Redirecting…"
-            : `Buy credits ($${TOP_UP.priceUsd} = ${TOP_UP.credits} credit)`}
+            : `Buy top-up ($${TOPUP_MINUTES.priceUsd} = ${TOPUP_MINUTES.minutes} min)`}
         </button>
-        {(Object.keys(SUBSCRIPTION_TIERS) as SubscriptionTierId[]).map((tier) => {
-          const plan = SUBSCRIPTION_TIERS[tier];
+        {(Object.keys(MINUTE_TIERS) as MinutesTierId[]).map((tier) => {
+          const plan = MINUTE_TIERS[tier];
           return (
             <button
               key={tier}
@@ -79,7 +78,7 @@ export function BillingActions({
             >
               {pending === `subscribe:${tier}`
                 ? "Redirecting…"
-                : `${plan.label} — $${plan.priceUsd}/mo (${plan.monthlyCredits} credits/mo)`}
+                : `${plan.label} — $${plan.priceUsd}/mo (${plan.monthlyMinutes} min/mo)`}
             </button>
           );
         })}

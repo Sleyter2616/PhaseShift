@@ -1,8 +1,26 @@
 import { getServiceClient } from "@/lib/db/service-client";
+import { refundMinutesForFailedScript } from "@/lib/billing/refund-minutes";
 
 export async function markScriptFailed(scriptId: string, message: string): Promise<void> {
   const supabase = getServiceClient();
   const errorMessage = message.slice(0, 4000);
+
+  const { data: script } = await supabase
+    .from("scripts")
+    .select("user_id")
+    .eq("id", scriptId)
+    .maybeSingle();
+
+  if (script?.user_id) {
+    try {
+      await refundMinutesForFailedScript(supabase, script.user_id, scriptId);
+    } catch (refundError) {
+      console.error("minutes refund on script failure failed", {
+        scriptId,
+        error: refundError instanceof Error ? refundError.message : refundError,
+      });
+    }
+  }
 
   await supabase
     .from("scripts")
