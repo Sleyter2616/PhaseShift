@@ -20,6 +20,7 @@ import {
   defaultTtsModelIdForScript,
   defaultTtsProvider,
 } from "@/lib/pipeline/synthesis-identity";
+import { capturePathError } from "@/lib/sentry/capture";
 import { createClient } from "@/lib/supabase/server";
 import { isMockProviderVoiceId } from "@/lib/voice/process-voice-sample";
 import {
@@ -221,13 +222,15 @@ export async function POST(request: Request) {
           { status: 402 },
         );
       }
+      capturePathError(spendError, "api.scripts.spend_minutes");
       return NextResponse.json({ error: spendError.message }, { status: 500 });
     }
 
     let breakdown;
     try {
       breakdown = normalizeSpendRpcResult(spendData);
-    } catch {
+    } catch (normalizeError) {
+      capturePathError(normalizeError, "api.scripts.spend_normalize");
       return NextResponse.json({ error: "invalid_spend_minutes_result" }, { status: 500 });
     }
 
@@ -237,12 +240,14 @@ export async function POST(request: Request) {
         data: { script_id: script.id },
       });
     } catch (enqueueError) {
+      capturePathError(enqueueError, "api.scripts.enqueue");
       const message =
         enqueueError instanceof Error ? enqueueError.message : "unknown enqueue error";
       const service = getServiceClient();
       try {
         await refundMinutesBreakdown(service, userId, script.id, breakdown);
       } catch (refundError) {
+        capturePathError(refundError, "api.scripts.enqueue_refund");
         console.error("enqueue refund failed", refundError);
       }
       await supabase
@@ -258,6 +263,7 @@ export async function POST(request: Request) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: error.flatten() }, { status: 400 });
     }
+    capturePathError(error, "api.scripts");
     const message = error instanceof Error ? error.message : "unknown error";
     return NextResponse.json({ error: message }, { status: 500 });
   }

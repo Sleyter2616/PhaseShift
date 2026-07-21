@@ -1,5 +1,6 @@
 import { getServiceClient } from "@/lib/db/service-client";
 import { refundMinutesForFailedScript } from "@/lib/billing/refund-minutes";
+import { capturePathError } from "@/lib/sentry/capture";
 
 export async function markScriptFailed(scriptId: string, message: string): Promise<void> {
   const supabase = getServiceClient();
@@ -15,6 +16,7 @@ export async function markScriptFailed(scriptId: string, message: string): Promi
     try {
       await refundMinutesForFailedScript(supabase, script.user_id, scriptId);
     } catch (refundError) {
+      capturePathError(refundError, "pipeline.mark_script_failed.refund");
       console.error("minutes refund on script failure failed", {
         scriptId,
         error: refundError instanceof Error ? refundError.message : refundError,
