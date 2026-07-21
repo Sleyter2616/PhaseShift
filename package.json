@@ -16,6 +16,7 @@
     "seed:dev": "tsx scripts/seed-dev-user.ts",
     "rls:e2e": "tsx scripts/rls-e2e.ts",
     "credits:concurrency": "tsx scripts/credits-concurrency.ts",
+    "minutes:concurrency": "tsx scripts/minutes-concurrency.ts",
     "verify:phase1": "tsx scripts/verify-phase1.ts",
     "resynth:check": "tsx scripts/resynth-check.ts",
     "re:reconcile": "tsx scripts/re-reconcile.ts",
@@ -24,7 +25,8 @@
     "script:dump": "tsx scripts/script-dump.ts",
     "tts:sample": "tsx scripts/tts-sample.ts",
     "tts:matrix": "tsx scripts/tts-matrix.ts",
-    "billing:sim": "tsx scripts/billing-sim.ts"
+    "billing:sim": "tsx scripts/billing-sim.ts",
+    "minutes:billing:sim": "tsx scripts/minutes-billing-sim.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",

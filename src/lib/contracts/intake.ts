@@ -255,6 +255,7 @@ export const WIZARD_STEP_SCHEMAS = [
 
 export const createScriptBodySchema = intakeSchema.extend({
   voice_profile_id: z.string().uuid().optional(),
+  stock_voice_id: z.string().min(1).optional(),
 });
 
 export type CreateScriptBody = z.infer<typeof createScriptBodySchema>;

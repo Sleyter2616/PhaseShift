@@ -1,11 +1,11 @@
 import type Stripe from "stripe";
 import type { ServiceClient } from "../db/service-client";
 import {
-  monthlyCreditsForTier,
+  monthlyMinutesForTier,
   tierForStripePriceId,
-  TOP_UP,
-  type SubscriptionTierId,
-} from "./plans";
+  TOPUP_MINUTES,
+  type MinutesTierId,
+} from "./minutes";
 
 export interface StripeWebhookContext {
   supabase: ServiceClient;
@@ -44,24 +44,35 @@ export async function findUserIdByStripeCustomer(
   return data?.id ?? null;
 }
 
-export async function grantCreditsForUser(
+export async function grantTopupMinutesForUser(
   supabase: ServiceClient,
   userId: string,
-  amount: number,
-  reason: "purchase" | "grant",
+  minutes: number,
 ): Promise<void> {
-  const { error } = await supabase.rpc("grant_credits", {
+  const { error } = await supabase.rpc("grant_topup_minutes", {
     p_user: userId,
-    p_amount: amount,
-    p_reason: reason,
-    p_script: null,
+    p_minutes: minutes,
+  });
+  if (error) throw new Error(error.message);
+}
+
+export async function grantSubscriptionMinutesForUser(
+  supabase: ServiceClient,
+  userId: string,
+  minutes: number,
+  periodEnd: string,
+): Promise<void> {
+  const { error } = await supabase.rpc("grant_subscription_minutes", {
+    p_user: userId,
+    p_minutes: minutes,
+    p_period_end: periodEnd,
   });
   if (error) throw new Error(error.message);
 }
 
 function subscriptionTierFromItems(
   subscription: Stripe.Subscription,
-): SubscriptionTierId | null {
+): MinutesTierId | null {
   const priceId = subscription.items.data[0]?.price?.id;
   if (!priceId) return null;
   return tierForStripePriceId(priceId);
@@ -92,11 +103,23 @@ function invoiceLinePriceId(line: Stripe.InvoiceLineItem | undefined): string | 
   return legacy ?? null;
 }
 
+function invoicePeriodEndIso(invoice: Stripe.Invoice): string | null {
+  const linePeriodEnd = invoice.lines?.data?.[0]?.period?.end;
+  if (typeof linePeriodEnd === "number") {
+    return new Date(linePeriodEnd * 1000).toISOString();
+  }
+  const legacy = (invoice as { period_end?: number }).period_end;
+  if (typeof legacy === "number") {
+    return new Date(legacy * 1000).toISOString();
+  }
+  return null;
+}
+
 export async function syncSubscriptionProfile(
   supabase: ServiceClient,
   userId: string,
   subscription: Stripe.Subscription,
-): Promise<SubscriptionTierId | null> {
+): Promise<MinutesTierId | null> {
   const tier = subscriptionTierFromItems(subscription);
   const status =
     subscription.status === "active"
@@ -125,13 +148,13 @@ export async function syncSubscriptionProfile(
   return tier;
 }
 
-export function topupCreditsFromSession(session: Stripe.Checkout.Session): number {
-  const metadataCredits = session.metadata?.credits;
-  if (metadataCredits) {
-    const parsed = Number(metadataCredits);
+export function topupMinutesFromSession(session: Stripe.Checkout.Session): number {
+  const metadataMinutes = session.metadata?.minutes;
+  if (metadataMinutes) {
+    const parsed = Number(metadataMinutes);
     if (!Number.isNaN(parsed) && parsed > 0) return parsed;
   }
-  return TOP_UP.credits;
+  return TOPUP_MINUTES.minutes;
 }
 
 export async function handleStripeWebhookEvent(ctx: StripeWebhookContext): Promise<void> {
@@ -143,12 +166,7 @@ export async function handleStripeWebhookEvent(ctx: StripeWebhookContext): Promi
       if (session.mode === "payment") {
         const userId = session.metadata?.user_id;
         if (!userId) break;
-        await grantCreditsForUser(
-          supabase,
-          userId,
-          topupCreditsFromSession(session),
-          "purchase",
-        );
+        await grantTopupMinutesForUser(supabase, userId, topupMinutesFromSession(session));
       }
       break;
     }
@@ -172,6 +190,7 @@ export async function handleStripeWebhookEvent(ctx: StripeWebhookContext): Promi
           : subscription.customer.id;
       const userId = await findUserIdByStripeCustomer(supabase, customerId);
       if (!userId) break;
+      // Keep remaining minutes until period end — do not zero pools.
       await supabase
         .from("profiles")
         .update({
@@ -196,12 +215,25 @@ export async function handleStripeWebhookEvent(ctx: StripeWebhookContext): Promi
       const tier = tierForStripePriceId(priceId);
       if (!tier) break;
 
-      await grantCreditsForUser(
+      const periodEnd = invoicePeriodEndIso(invoice);
+      if (!periodEnd) break;
+
+      await grantSubscriptionMinutesForUser(
         supabase,
         userId,
-        monthlyCreditsForTier(tier),
-        "grant",
+        monthlyMinutesForTier(tier),
+        periodEnd,
       );
+
+      await supabase
+        .from("profiles")
+        .update({
+          subscription_status: "active",
+          subscription_tier: tier,
+          tier,
+          subscription_current_period_end: periodEnd,
+        })
+        .eq("id", userId);
       break;
     }
     default:

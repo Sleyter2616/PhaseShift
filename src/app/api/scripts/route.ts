@@ -1,7 +1,16 @@
 import { z } from "zod";
 import { NextResponse } from "next/server";
-import { isInsufficientCreditsError } from "@/lib/auth/session";
-import { creditsPerGeneration } from "@/lib/billing/plans";
+import {
+  availableMinutes,
+  minutesCost,
+  SESSION_LENGTH_MINUTES,
+  type MinutePools,
+} from "@/lib/billing/minutes";
+import {
+  isInsufficientMinutesError,
+  normalizeSpendRpcResult,
+  refundMinutesBreakdown,
+} from "@/lib/billing/refund-minutes";
 import { createScriptBodySchema } from "@/lib/contracts/intake";
 import { PROMPT_VERSION } from "@/lib/compiler/prompt.v1.4";
 import { getServiceClient } from "@/lib/db/service-client";
@@ -13,6 +22,10 @@ import {
 } from "@/lib/pipeline/synthesis-identity";
 import { createClient } from "@/lib/supabase/server";
 import { isMockProviderVoiceId } from "@/lib/voice/process-voice-sample";
+import {
+  defaultStockVoiceId,
+  isAllowedStockVoiceId,
+} from "@/lib/voice/stock-voices";
 
 export async function POST(request: Request) {
   try {
@@ -28,16 +41,20 @@ export async function POST(request: Request) {
     const userId = user.id;
     const body: unknown = await request.json();
     const parsed = createScriptBodySchema.parse(body);
-    const { voice_profile_id: requestedVoiceProfileId, ...intake } = parsed;
+    const {
+      voice_profile_id: requestedVoiceProfileId,
+      stock_voice_id: requestedStockVoiceId,
+      ...intake
+    } = parsed;
 
     const provider = defaultTtsProvider();
-    const stockVoiceId =
+    const fallbackStock =
       provider === "selfhost"
-        ? (process.env.ELEVENLABS_STOCK_VOICE_ID ?? "mock-voice")
-        : process.env.ELEVENLABS_STOCK_VOICE_ID;
+        ? (defaultStockVoiceId() ?? "mock-voice")
+        : defaultStockVoiceId();
 
     let voiceProfileId: string | null = null;
-    let scriptStockVoiceId: string | null = stockVoiceId ?? null;
+    let scriptStockVoiceId: string | null = null;
 
     if (requestedVoiceProfileId) {
       const { data: voiceProfile, error: voiceProfileError } = await supabase
@@ -59,15 +76,42 @@ export async function POST(request: Request) {
       }
       voiceProfileId = voiceProfile.id;
       scriptStockVoiceId = null;
-    } else if (!scriptStockVoiceId) {
-      return NextResponse.json(
-        { error: "ELEVENLABS_STOCK_VOICE_ID is required when TTS_PROVIDER=elevenlabs" },
-        { status: 500 },
-      );
+    } else {
+      const stockId = requestedStockVoiceId ?? fallbackStock;
+      if (!stockId) {
+        return NextResponse.json(
+          {
+            error:
+              "ELEVENLABS_STOCK_VOICE_ID or ELEVENLABS_STOCK_VOICE_MALE/FEMALE is required when TTS_PROVIDER=elevenlabs",
+          },
+          { status: 500 },
+        );
+      }
+      if (
+        provider === "elevenlabs" &&
+        requestedStockVoiceId &&
+        !isAllowedStockVoiceId(requestedStockVoiceId)
+      ) {
+        return NextResponse.json({ error: "invalid stock_voice_id" }, { status: 400 });
+      }
+      scriptStockVoiceId = stockId;
     }
 
+    const isOwnVoice = voiceProfileId != null;
+    const generationCost = minutesCost(SESSION_LENGTH_MINUTES, isOwnVoice);
     const ttsModelId = defaultTtsModelIdForScript(voiceProfileId);
-    const generationCost = creditsPerGeneration(ttsModelId);
+
+    const { data: poolsRow } = await supabase
+      .from("profiles")
+      .select("subscription_minutes, topup_minutes")
+      .eq("id", userId)
+      .maybeSingle();
+
+    const pools: MinutePools = {
+      subscription: Number(poolsRow?.subscription_minutes ?? 0),
+      topup: Number(poolsRow?.topup_minutes ?? 0),
+    };
+    const available = availableMinutes(pools);
 
     const title = intake.goal_statement.slice(0, 80);
     let goalId: string;
@@ -154,21 +198,37 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: scriptError?.message ?? "script insert failed" }, { status: 500 });
     }
 
-    const { error: spendError } = await supabase.rpc("spend_credits", {
+    const { data: spendData, error: spendError } = await supabase.rpc("spend_minutes", {
+      p_user: userId,
+      p_minutes: generationCost,
       p_script: script.id,
-      p_amount: generationCost,
-      p_reason: "generation",
     });
 
     if (spendError) {
-      if (isInsufficientCreditsError(spendError)) {
+      if (isInsufficientMinutesError(spendError)) {
+        const stockCost = minutesCost(SESSION_LENGTH_MINUTES, false);
         await supabase
           .from("scripts")
-          .update({ status: "failed", error_message: "insufficient_credits" })
+          .update({ status: "failed", error_message: "insufficient_minutes" })
           .eq("id", script.id);
-        return NextResponse.json({ error: "insufficient_credits" }, { status: 402 });
+        return NextResponse.json(
+          {
+            error: "insufficient_minutes",
+            needed: generationCost,
+            available,
+            canUseStock: !isOwnVoice ? false : available >= stockCost,
+          },
+          { status: 402 },
+        );
       }
       return NextResponse.json({ error: spendError.message }, { status: 500 });
+    }
+
+    let breakdown;
+    try {
+      breakdown = normalizeSpendRpcResult(spendData);
+    } catch {
+      return NextResponse.json({ error: "invalid_spend_minutes_result" }, { status: 500 });
     }
 
     try {
@@ -180,11 +240,11 @@ export async function POST(request: Request) {
       const message =
         enqueueError instanceof Error ? enqueueError.message : "unknown enqueue error";
       const service = getServiceClient();
-      await service.rpc("refund_credits", {
-        p_user: userId,
-        p_script: script.id,
-        p_amount: generationCost,
-      });
+      try {
+        await refundMinutesBreakdown(service, userId, script.id, breakdown);
+      } catch (refundError) {
+        console.error("enqueue refund failed", refundError);
+      }
       await supabase
         .from("scripts")
         .update({ status: "failed", error_message: `enqueue_failed: ${message}`.slice(0, 4000) })

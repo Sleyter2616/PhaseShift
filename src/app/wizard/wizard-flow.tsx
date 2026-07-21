@@ -5,6 +5,12 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { ChoiceControl } from "@/components/choice-control";
 import {
+  availableMinutes,
+  minutesCost,
+  SESSION_LENGTH_MINUTES,
+  TOPUP_MINUTES,
+} from "@/lib/billing/minutes";
+import {
   hasConcreteNounToken,
   maxTimeframeIsoDate,
   PRESENT_TENSE_GOAL_PATTERN,
@@ -20,6 +26,7 @@ import {
   type WizardDraft,
 } from "@/lib/contracts/wizard";
 import { WIZARD_STEP_COPY } from "@/lib/contracts/wizard-copy";
+import type { StockVoiceOption } from "@/lib/voice/stock-voices";
 import { ChipInput } from "./chip-input";
 import { FieldExplainer, StepExplainer } from "./step-explainer";
 
@@ -29,22 +36,55 @@ const FEATURE_LINT_MESSAGE =
 
 interface WizardFlowProps {
   readyVoiceProfileId: string | null;
-  stockVoiceLabel: string;
+  stockVoices: StockVoiceOption[];
+  minutesBalance: {
+    subscription: number;
+    topup: number;
+    resetAt: string | null;
+  };
 }
 
-export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowProps) {
+type InsufficientPayload = {
+  needed: number;
+  available: number;
+  canUseStock: boolean;
+};
+
+function formatResetDate(iso: string | null): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString();
+}
+
+export function WizardFlow({
+  readyVoiceProfileId,
+  stockVoices,
+  minutesBalance,
+}: WizardFlowProps) {
   const router = useRouter();
+  const defaultStockId = stockVoices[0]?.id ?? null;
   const [step, setStep] = useState(1);
-  const [draft, setDraft] = useState<WizardDraft>(EMPTY_WIZARD_DRAFT);
+  const [draft, setDraft] = useState<WizardDraft>({
+    ...EMPTY_WIZARD_DRAFT,
+    stock_voice_id: defaultStockId,
+  });
   const [stepError, setStepError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [insufficientCredits, setInsufficientCredits] = useState(false);
+  const [insufficient, setInsufficient] = useState<InsufficientPayload | null>(null);
   const [pending, setPending] = useState(false);
+  const [checkoutPending, setCheckoutPending] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [useCustomDate, setUseCustomDate] = useState(false);
 
   const showRewriteChip = PRESENT_TENSE_GOAL_PATTERN.test(draft.goal_statement);
   const goalCharCount = draft.goal_statement.length;
+  const isOwnVoice = draft.voice_profile_id != null;
+  const sessionCost = minutesCost(SESSION_LENGTH_MINUTES, isOwnVoice);
+  const balanceTotal = availableMinutes({
+    subscription: minutesBalance.subscription,
+    topup: minutesBalance.topup,
+  });
+  const stockCost = minutesCost(SESSION_LENGTH_MINUTES, false);
+  const ownCost = minutesCost(SESSION_LENGTH_MINUTES, true);
 
   const dateBounds = useMemo(
     () => ({ min: todayIsoDate(), max: maxTimeframeIsoDate() }),
@@ -54,6 +94,19 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
   function updateDraft(patch: Partial<WizardDraft>) {
     setDraft((current) => ({ ...current, ...patch }));
     setStepError(null);
+    setInsufficient(null);
+  }
+
+  function selectStockVoice(voiceId: string) {
+    updateDraft({ voice_profile_id: null, stock_voice_id: voiceId });
+  }
+
+  function selectOwnVoice() {
+    if (!readyVoiceProfileId) return;
+    updateDraft({
+      voice_profile_id: readyVoiceProfileId,
+      stock_voice_id: draft.stock_voice_id ?? defaultStockId,
+    });
   }
 
   function goNext() {
@@ -73,6 +126,26 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
     setStep((current) => Math.max(1, current - 1));
   }
 
+  async function startTopupCheckout() {
+    setCheckoutPending(true);
+    setSubmitError(null);
+    try {
+      const response = await fetch("/api/billing/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "topup" }),
+      });
+      const data = (await response.json()) as { url?: string; error?: string };
+      if (!response.ok || !data.url) {
+        throw new Error(data.error ?? "checkout failed");
+      }
+      window.location.href = data.url;
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : "checkout failed");
+      setCheckoutPending(false);
+    }
+  }
+
   async function handleSubmit() {
     for (let s = 1; s <= STEP_COUNT; s += 1) {
       const error = validateWizardStep(s, draft);
@@ -83,15 +156,30 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
       }
     }
 
+    if (!isOwnVoice && !draft.stock_voice_id && stockVoices.length > 0) {
+      setStepError("Select a stock voice");
+      return;
+    }
+
+    if (balanceTotal < sessionCost) {
+      const canUseStock = isOwnVoice && balanceTotal >= stockCost;
+      setInsufficient({ needed: sessionCost, available: balanceTotal, canUseStock });
+      return;
+    }
+
     setPending(true);
     setSubmitError(null);
-    setInsufficientCredits(false);
+    setInsufficient(null);
 
     try {
       const intake = draftToIntake(draft);
       const body = {
         ...intake,
-        ...(draft.voice_profile_id ? { voice_profile_id: draft.voice_profile_id } : {}),
+        ...(draft.voice_profile_id
+          ? { voice_profile_id: draft.voice_profile_id }
+          : draft.stock_voice_id
+            ? { stock_voice_id: draft.stock_voice_id }
+            : {}),
       };
 
       const response = await fetch("/api/scripts", {
@@ -100,9 +188,13 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
         body: JSON.stringify(body),
       });
 
-      const payload: { script_id?: string; error?: string | object } = await response
-        .json()
-        .catch(() => ({}));
+      const payload: {
+        script_id?: string;
+        error?: string | object;
+        needed?: number;
+        available?: number;
+        canUseStock?: boolean;
+      } = await response.json().catch(() => ({}));
 
       if (response.status === 202 && payload.script_id) {
         router.push(`/dev/scripts/${payload.script_id}`);
@@ -110,7 +202,11 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
       }
 
       if (response.status === 402) {
-        setInsufficientCredits(true);
+        setInsufficient({
+          needed: Number(payload.needed ?? sessionCost),
+          available: Number(payload.available ?? balanceTotal),
+          canUseStock: Boolean(payload.canUseStock),
+        });
         return;
       }
 
@@ -447,20 +543,29 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
           <fieldset>
             <legend className="setup-label">Voice</legend>
             <div className="mt-3 space-y-2 text-[var(--text-hi)]">
-              <ChoiceControl
-                name="voice"
-                checked={draft.voice_profile_id === null}
-                onChange={() => updateDraft({ voice_profile_id: null })}
-              >
-                {stockVoiceLabel}
-              </ChoiceControl>
+              {stockVoices.length === 0 ? (
+                <p className="margin-note">No stock voices configured.</p>
+              ) : (
+                stockVoices.map((voice) => (
+                  <ChoiceControl
+                    key={voice.id}
+                    name="voice"
+                    checked={draft.voice_profile_id === null && draft.stock_voice_id === voice.id}
+                    onChange={() => selectStockVoice(voice.id)}
+                  >
+                    {voice.label}
+                    <span className="ml-2 text-sm text-[var(--text-lo)]">({stockCost} min)</span>
+                  </ChoiceControl>
+                ))
+              )}
               {readyVoiceProfileId ? (
                 <ChoiceControl
                   name="voice"
                   checked={draft.voice_profile_id === readyVoiceProfileId}
-                  onChange={() => updateDraft({ voice_profile_id: readyVoiceProfileId })}
+                  onChange={selectOwnVoice}
                 >
                   My voice
+                  <span className="ml-2 text-sm text-[var(--text-lo)]">({ownCost} min)</span>
                 </ChoiceControl>
               ) : (
                 <p className="margin-note">
@@ -472,6 +577,21 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
               )}
             </div>
           </fieldset>
+
+          <div className="space-y-2 rounded border border-[var(--setup-border)] bg-[var(--setup-panel)] p-4 text-sm">
+            <p className="text-[var(--text-hi)]">
+              This session uses{" "}
+              <span className="font-medium tabular-nums">{sessionCost} minutes</span> (
+              {isOwnVoice ? "your own voice" : "stock voice"}).
+            </p>
+            <p className="text-[var(--text-mid)]">
+              Balance:{" "}
+              <span className="tabular-nums">{minutesBalance.subscription}</span> subscription +{" "}
+              <span className="tabular-nums">{minutesBalance.topup}</span> top-up (
+              <span className="tabular-nums">{balanceTotal}</span> total). Resets{" "}
+              {formatResetDate(minutesBalance.resetAt)}.
+            </p>
+          </div>
 
           <div>
             <button
@@ -511,8 +631,34 @@ export function WizardFlow({ readyVoiceProfileId, stockVoiceLabel }: WizardFlowP
             ) : null}
           </div>
 
-          {insufficientCredits ? (
-            <p className="text-warning">Insufficient credits for generation.</p>
+          {insufficient ? (
+            <div className="space-y-3 rounded border border-[var(--color-warning)]/40 bg-[color-mix(in_srgb,var(--color-warning)_10%,transparent)] p-4">
+              <p className="text-warning">
+                Not enough minutes ({insufficient.available} available, {insufficient.needed}{" "}
+                needed).
+              </p>
+              <div className="flex flex-wrap gap-3">
+                {insufficient.canUseStock && defaultStockId ? (
+                  <button
+                    type="button"
+                    className="btn-clay"
+                    onClick={() => selectStockVoice(defaultStockId)}
+                  >
+                    Switch to a stock voice to generate now
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  disabled={checkoutPending}
+                  onClick={() => void startTopupCheckout()}
+                >
+                  {checkoutPending
+                    ? "Redirecting…"
+                    : `Buy ${TOPUP_MINUTES.minutes} more minutes ($${TOPUP_MINUTES.priceUsd})`}
+                </button>
+              </div>
+            </div>
           ) : null}
           {submitError ? <p className="text-error">{submitError}</p> : null}
         </section>

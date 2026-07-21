@@ -2,27 +2,47 @@ import { describe, expect, it, vi } from "vitest";
 import type Stripe from "stripe";
 import type { ServiceClient } from "../db/service-client";
 import {
-  grantCreditsForUser,
+  grantSubscriptionMinutesForUser,
+  grantTopupMinutesForUser,
   handleStripeWebhookEvent,
   insertStripeEventIfNew,
-  topupCreditsFromSession,
+  topupMinutesFromSession,
 } from "./webhook";
 
 function mockSupabase(overrides: {
   insertError?: { code?: string; message: string } | null;
   grantError?: { message: string } | null;
   rpcCalls?: Array<{ name: string; args: Record<string, unknown> }>;
+  profileUpdates?: Array<Record<string, unknown>>;
 }) {
   const rpcCalls = overrides.rpcCalls ?? [];
+  const profileUpdates = overrides.profileUpdates ?? [];
   const supabase = {
     from(table: string) {
-      if (table !== "stripe_events") throw new Error(`unexpected table ${table}`);
-      return {
-        insert: vi.fn(async () => {
-          if (overrides.insertError) return { error: overrides.insertError };
-          return { error: null };
-        }),
-      };
+      if (table === "stripe_events") {
+        return {
+          insert: vi.fn(async () => {
+            if (overrides.insertError) return { error: overrides.insertError };
+            return { error: null };
+          }),
+        };
+      }
+      if (table === "profiles") {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({ data: { id: "user-guided" }, error: null }),
+            }),
+          }),
+          update: (values: Record<string, unknown>) => {
+            profileUpdates.push(values);
+            return {
+              eq: async () => ({ error: null }),
+            };
+          },
+        };
+      }
+      throw new Error(`unexpected table ${table}`);
     },
     rpc: vi.fn(async (name: string, args: Record<string, unknown>) => {
       rpcCalls.push({ name, args });
@@ -30,10 +50,10 @@ function mockSupabase(overrides: {
       return { error: null };
     }),
   };
-  return { supabase: supabase as unknown as ServiceClient, rpcCalls };
+  return { supabase: supabase as unknown as ServiceClient, rpcCalls, profileUpdates };
 }
 
-describe("stripe webhook helpers", () => {
+describe("stripe webhook minutes grants", () => {
   it("insertStripeEventIfNew returns duplicate on primary key conflict", async () => {
     const { supabase } = mockSupabase({
       insertError: { code: "23505", message: "duplicate key" },
@@ -45,69 +65,61 @@ describe("stripe webhook helpers", () => {
     expect(result).toBe("duplicate");
   });
 
-  it("grantCreditsForUser calls grant_credits RPC", async () => {
+  it("grantTopupMinutesForUser calls grant_topup_minutes RPC", async () => {
     const { supabase, rpcCalls } = mockSupabase({});
-    await grantCreditsForUser(supabase, "user-1", 1, "purchase");
+    await grantTopupMinutesForUser(supabase, "user-1", 80);
+    expect(rpcCalls).toEqual([
+      { name: "grant_topup_minutes", args: { p_user: "user-1", p_minutes: 80 } },
+    ]);
+  });
+
+  it("grantSubscriptionMinutesForUser calls grant_subscription_minutes RPC", async () => {
+    const { supabase, rpcCalls } = mockSupabase({});
+    await grantSubscriptionMinutesForUser(supabase, "user-1", 240, "2026-08-01T00:00:00.000Z");
     expect(rpcCalls).toEqual([
       {
-        name: "grant_credits",
-        args: { p_user: "user-1", p_amount: 1, p_reason: "purchase", p_script: null },
+        name: "grant_subscription_minutes",
+        args: {
+          p_user: "user-1",
+          p_minutes: 240,
+          p_period_end: "2026-08-01T00:00:00.000Z",
+        },
       },
     ]);
   });
 
-  it("topupCreditsFromSession prefers metadata credits", () => {
+  it("topupMinutesFromSession prefers metadata minutes", () => {
     expect(
-      topupCreditsFromSession({
-        metadata: { credits: "3" },
+      topupMinutesFromSession({
+        metadata: { minutes: "160" },
       } as unknown as Stripe.Checkout.Session),
-    ).toBe(3);
+    ).toBe(160);
     expect(
-      topupCreditsFromSession({ metadata: {} } as unknown as Stripe.Checkout.Session),
-    ).toBe(1);
+      topupMinutesFromSession({ metadata: {} } as unknown as Stripe.Checkout.Session),
+    ).toBe(80);
   });
 
-  it("checkout.session.completed payment grants purchase credits once per handler call", async () => {
+  it("checkout.session.completed payment grants topup minutes", async () => {
     const { supabase, rpcCalls } = mockSupabase({});
     const event = {
       type: "checkout.session.completed",
       data: {
         object: {
           mode: "payment",
-          metadata: { user_id: "user-abc", credits: "1" },
+          metadata: { user_id: "user-abc", minutes: "80" },
         },
       },
     } as unknown as Stripe.Event;
 
     await handleStripeWebhookEvent({ supabase, event });
-    expect(rpcCalls).toHaveLength(1);
-    expect(rpcCalls[0]).toMatchObject({
-      name: "grant_credits",
-      args: { p_user: "user-abc", p_amount: 1, p_reason: "purchase" },
-    });
+    expect(rpcCalls).toEqual([
+      { name: "grant_topup_minutes", args: { p_user: "user-abc", p_minutes: 80 } },
+    ]);
   });
 
-  it("invoice.paid grants monthly allotment for mapped tier price", async () => {
+  it("invoice.paid grants monthly minutes and sets period end", async () => {
     vi.stubEnv("STRIPE_PRICE_GUIDED", "price_guided_test");
-    const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
-    const supabase = {
-      from(table: string) {
-        if (table === "profiles") {
-          return {
-            select: () => ({
-              eq: () => ({
-                maybeSingle: async () => ({ data: { id: "user-guided" }, error: null }),
-              }),
-            }),
-          };
-        }
-        throw new Error(`unexpected table ${table}`);
-      },
-      rpc: async (name: string, args: Record<string, unknown>) => {
-        rpcCalls.push({ name, args });
-        return { error: null };
-      },
-    } as unknown as ServiceClient;
+    const { supabase, rpcCalls, profileUpdates } = mockSupabase({});
 
     const event = {
       type: "invoice.paid",
@@ -116,7 +128,12 @@ describe("stripe webhook helpers", () => {
           customer: "cus_1",
           parent: { subscription_details: { subscription: "sub_1" } },
           lines: {
-            data: [{ pricing: { price_details: { price: "price_guided_test" } } }],
+            data: [
+              {
+                pricing: { price_details: { price: "price_guided_test" } },
+                period: { end: 1785513600 },
+              },
+            ],
           },
         },
       },
@@ -125,10 +142,38 @@ describe("stripe webhook helpers", () => {
     await handleStripeWebhookEvent({ supabase, event });
     expect(rpcCalls).toEqual([
       {
-        name: "grant_credits",
-        args: { p_user: "user-guided", p_amount: 3, p_reason: "grant", p_script: null },
+        name: "grant_subscription_minutes",
+        args: {
+          p_user: "user-guided",
+          p_minutes: 240,
+          p_period_end: new Date(1785513600 * 1000).toISOString(),
+        },
       },
     ]);
+    expect(profileUpdates[0]).toMatchObject({
+      subscription_status: "active",
+      subscription_tier: "guided",
+    });
     vi.unstubAllEnvs();
+  });
+
+  it("customer.subscription.deleted cancels without zeroing minutes", async () => {
+    const { supabase, rpcCalls, profileUpdates } = mockSupabase({});
+    const event = {
+      type: "customer.subscription.deleted",
+      data: {
+        object: {
+          customer: "cus_1",
+        },
+      },
+    } as unknown as Stripe.Event;
+
+    await handleStripeWebhookEvent({ supabase, event });
+    expect(rpcCalls).toEqual([]);
+    expect(profileUpdates[0]).toEqual({
+      subscription_status: "canceled",
+      subscription_tier: null,
+      tier: "trial",
+    });
   });
 });
