@@ -5,6 +5,7 @@ import {
   handleStripeWebhookEvent,
   insertStripeEventIfNew,
 } from "@/lib/billing/webhook";
+import { capturePathError } from "@/lib/sentry/capture";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,6 +39,7 @@ export async function POST(request: Request) {
   try {
     await handleStripeWebhookEvent({ supabase, event });
   } catch (error) {
+    capturePathError(error, "api.webhooks.stripe");
     // Roll back idempotency marker so Stripe retries can re-process.
     await supabase.from("stripe_events").delete().eq("id", event.id);
     const message = error instanceof Error ? error.message : "handler failed";

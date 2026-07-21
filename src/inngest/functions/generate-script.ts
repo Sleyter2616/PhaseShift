@@ -14,6 +14,7 @@ import {
   loadScriptSynthesisIdentity,
   type ScriptVoiceSource,
 } from "@/lib/pipeline/synthesis-identity";
+import { capturePathError } from "@/lib/sentry/capture";
 import type { CompilerInput } from "@/lib/session/derive";
 import { synthesizeSegment } from "./synthesize-segment";
 
@@ -202,6 +203,7 @@ export const generateScript = inngest.createFunction(
 
       return { script_id: scriptId, status: "ready" };
     } catch (error) {
+      capturePathError(error, "pipeline.generate_script");
       const message =
         error instanceof CompilerError
           ? formatCompilerFailureMessage(error)
