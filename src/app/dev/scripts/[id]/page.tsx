@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { AutoRefresh } from "@/components/auto-refresh";
 import { Mark } from "@/components/mark";
 import { SetupHeader } from "@/components/setup-header";
+import { SiteFooter } from "@/components/site-footer";
 import { getSessionUser } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 
@@ -51,9 +52,9 @@ export default async function DevScriptStatusPage({ params }: PageProps) {
   const isReady = script.status === "ready";
 
   return (
-    <div className="setup-ground min-h-dvh">
+    <div className="setup-ground flex min-h-dvh flex-col">
       <SetupHeader />
-      <main className="mx-auto max-w-3xl space-y-8 px-4 py-8 sm:px-6">
+      <main className="mx-auto w-full max-w-3xl flex-1 space-y-8 px-4 py-8 sm:px-6">
         <AutoRefresh />
 
         <header className="space-y-3">
@@ -141,6 +142,7 @@ export default async function DevScriptStatusPage({ params }: PageProps) {
           </Link>
         </p>
       </main>
+      <SiteFooter />
     </div>
   );
 }

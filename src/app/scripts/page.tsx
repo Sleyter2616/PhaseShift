@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Mark } from "@/components/mark";
 import { SetupHeader } from "@/components/setup-header";
+import { SiteFooter } from "@/components/site-footer";
 import { needsOnboarding } from "@/lib/auth/onboarding";
 import { getSessionUser } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
@@ -56,19 +57,20 @@ export default async function ScriptsPage() {
 
   if (error) {
     return (
-      <div className="setup-ground min-h-dvh">
+      <div className="setup-ground flex min-h-dvh flex-col">
         <SetupHeader />
-        <main className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+        <main className="mx-auto max-w-3xl flex-1 px-4 py-8 sm:px-6">
           <p className="text-error">Failed to load scripts: {error.message}</p>
         </main>
+        <SiteFooter />
       </div>
     );
   }
 
   return (
-    <div className="setup-ground min-h-dvh">
+    <div className="setup-ground flex min-h-dvh flex-col">
       <SetupHeader />
-      <main className="mx-auto max-w-3xl space-y-8 px-4 py-8 sm:px-6">
+      <main className="mx-auto w-full max-w-3xl flex-1 space-y-8 px-4 py-8 sm:px-6">
         <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
           <h1 className="flex items-center gap-2.5 font-display text-2xl font-normal text-[var(--text-hi)]">
             <Mark size={22} />
@@ -130,6 +132,7 @@ export default async function ScriptsPage() {
           </p>
         )}
       </main>
+      <SiteFooter />
     </div>
   );
 }

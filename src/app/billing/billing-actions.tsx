@@ -60,7 +60,7 @@ export function BillingActions({
           type="button"
           disabled={pending !== null}
           onClick={() => startCheckout("topup")}
-          className="rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          className="btn-clay disabled:opacity-50"
         >
           {pending === "topup"
             ? "Redirecting…"
@@ -74,7 +74,7 @@ export function BillingActions({
               type="button"
               disabled={pending !== null || subscribed}
               onClick={() => startCheckout("subscribe", tier)}
-              className="rounded border border-neutral-300 px-4 py-2 text-sm disabled:opacity-50"
+              className="btn-ghost disabled:opacity-50"
             >
               {pending === `subscribe:${tier}`
                 ? "Redirecting…"
@@ -87,13 +87,13 @@ export function BillingActions({
             type="button"
             disabled={pending !== null}
             onClick={openPortal}
-            className="rounded border border-neutral-300 px-4 py-2 text-sm disabled:opacity-50"
+            className="btn-ghost disabled:opacity-50"
           >
             {pending === "portal" ? "Opening…" : "Manage billing"}
           </button>
         ) : null}
       </div>
-      {error ? <p className="text-sm text-red-700">{error}</p> : null}
+      {error ? <p className="text-error">{error}</p> : null}
     </div>
   );
 }

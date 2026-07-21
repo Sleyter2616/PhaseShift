@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { SetupHeader } from "@/components/setup-header";
+import { SiteFooter } from "@/components/site-footer";
 import { getSessionUser } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { isRealReadyProfile } from "@/lib/voice/process-voice-sample";
@@ -26,9 +27,9 @@ export default async function WizardPage() {
   const stockVoices = stockVoiceOptionsFromEnv();
 
   return (
-    <div className="setup-ground min-h-dvh">
+    <div className="setup-ground flex min-h-dvh flex-col">
       <SetupHeader />
-      <main className="mx-auto max-w-xl px-4 py-8 sm:px-6">
+      <main className="mx-auto w-full max-w-xl flex-1 px-4 py-8 sm:px-6">
         <WizardFlow
           readyVoiceProfileId={readyVoiceProfileId}
           stockVoices={stockVoices}
@@ -39,6 +40,7 @@ export default async function WizardPage() {
           }}
         />
       </main>
+      <SiteFooter />
     </div>
   );
 }
