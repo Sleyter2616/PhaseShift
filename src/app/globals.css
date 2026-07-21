@@ -197,11 +197,27 @@
     color: var(--text-hi);
   }
 
-  /* Termly HTML on setup-ground — force readable dark tokens over export colors */
+  /* Light document panel — deliberate exception for dense Termly legal text */
+  .legal-document-surface {
+    max-width: 720px;
+    border-radius: var(--radius);
+    border: 1px solid color-mix(in srgb, #ece7db 18%, transparent);
+    background: #f7f4ee;
+    color: #1c1c1c;
+    padding: 1.75rem 1.5rem 2rem;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28);
+  }
+
+  @media (min-width: 640px) {
+    .legal-document-surface {
+      padding: 2.25rem 2.5rem 2.5rem;
+    }
+  }
+
   .legal-termly {
-    color: var(--text-mid);
+    color: #1c1c1c;
     font-size: 0.9375rem;
-    line-height: 1.65;
+    line-height: 1.7;
     overflow-wrap: anywhere;
   }
 
@@ -210,6 +226,7 @@
     display: none !important;
   }
 
+  /* Beat Termly inline color/background so nothing is invisible on the panel */
   .legal-termly,
   .legal-termly [data-custom-class="body"],
   .legal-termly [data-custom-class="body"] *,
@@ -218,10 +235,12 @@
   .legal-termly span,
   .legal-termly p,
   .legal-termly li,
+  .legal-termly ul,
+  .legal-termly ol,
   .legal-termly td,
   .legal-termly th,
   .legal-termly div {
-    color: var(--text-mid) !important;
+    color: #2a2a2a !important;
     background-color: transparent !important;
   }
 
@@ -237,7 +256,7 @@
   .legal-termly [data-custom-class="heading_3"] *,
   .legal-termly strong,
   .legal-termly b {
-    color: var(--text-hi) !important;
+    color: #141414 !important;
     background-color: transparent !important;
   }
 
@@ -246,13 +265,25 @@
   .legal-termly h3,
   .legal-termly h4 {
     font-family: var(--font-display), Georgia, serif !important;
+    margin-top: 1.25em;
+    margin-bottom: 0.5em;
+  }
+
+  .legal-termly ul,
+  .legal-termly ol {
+    padding-left: 1.35rem;
+    margin: 0.75em 0;
+  }
+
+  .legal-termly li {
+    margin: 0.35em 0;
   }
 
   .legal-termly a,
   .legal-termly a *,
   .legal-termly [data-custom-class="link"],
   .legal-termly [data-custom-class="link"] * {
-    color: var(--accent-sand) !important;
+    color: var(--setup-accent) !important;
     text-decoration: underline;
     text-underline-offset: 2px;
   }
@@ -260,11 +291,12 @@
   .legal-termly table {
     width: 100%;
     border-collapse: collapse;
+    margin: 1em 0;
   }
 
   .legal-termly th,
   .legal-termly td {
-    border: 1px solid var(--setup-border) !important;
+    border: 1px solid #d4cfc4 !important;
     padding: 0.5rem 0.75rem;
   }
 
