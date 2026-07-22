@@ -71,6 +71,91 @@ describe("validateManifest", () => {
     }
   });
 
+  it("accepts beta-absent sessions when budget is 0", () => {
+    const steps = [1, 2, 3, 12];
+    const thetaBudget = 400;
+    const perStep = thetaBudget / steps.length;
+    const segments = [
+      {
+        seq: 1,
+        phase: "alpha",
+        step: null,
+        pacing_wpm: 90,
+        target_duration_sec: 180,
+        pause_after_ms: 1000,
+        text: "You breathe slowly.",
+      },
+      ...steps.map((step, i) => thetaSegment(2 + i, step, perStep)),
+      {
+        seq: 6,
+        phase: "gamma",
+        step: null,
+        pacing_wpm: 150,
+        target_duration_sec: 140,
+        pause_after_ms: 500,
+        text: "You rise with energy.",
+      },
+    ];
+
+    const result = validateManifest(
+      {
+        meta: {
+          ...baseManifest.meta,
+          total_duration_sec: 720,
+          phase_budget_sec: { beta: 0, alpha: 180, theta: thetaBudget, gamma: 140 },
+        },
+        segments,
+      },
+      { expectedThetaSteps: steps },
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it("rejects unexpected theta steps against expectedThetaSteps", () => {
+    const steps = [1, 2, 12];
+    const segments = [
+      {
+        seq: 1,
+        phase: "alpha",
+        step: null,
+        pacing_wpm: 90,
+        target_duration_sec: 180,
+        pause_after_ms: 0,
+        text: "Alpha.",
+      },
+      thetaSegment(2, 1, 100),
+      thetaSegment(3, 2, 100),
+      thetaSegment(4, 5, 100),
+      thetaSegment(5, 12, 100),
+      {
+        seq: 6,
+        phase: "gamma",
+        step: null,
+        pacing_wpm: 150,
+        target_duration_sec: 140,
+        pause_after_ms: 0,
+        text: "Gamma.",
+      },
+    ];
+    const result = validateManifest(
+      {
+        meta: {
+          ...baseManifest.meta,
+          total_duration_sec: 720,
+          phase_budget_sec: { beta: 0, alpha: 180, theta: 400, gamma: 140 },
+        },
+        segments,
+      },
+      { expectedThetaSteps: steps },
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.some((e) => e.includes("unexpected") || e.includes("order"))).toBe(
+        true,
+      );
+    }
+  });
+
   it("returns formatted errors when phase budgets do not sum", () => {
     const result = validateManifest({
       ...baseManifest,

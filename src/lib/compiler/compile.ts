@@ -4,7 +4,11 @@ import {
   applySpeakableOutputNormalization,
   logSpeakableOutputChanges,
 } from "./speakable-output";
-import { COMPILER_PROMPT_V1_4, PROMPT_VERSION } from "../compiler/prompt.v1.4";
+import { COMPILER_PROMPT_V1_4, PROMPT_VERSION as PROMPT_VERSION_V1_4 } from "../compiler/prompt.v1.4";
+import {
+  COMPILER_PROMPT_V2,
+  PROMPT_VERSION as PROMPT_VERSION_V2,
+} from "../compiler/prompt.v2";
 import { stripCodeFences } from "../compiler/strip-fences";
 import { validateManifest, type Manifest } from "../contracts/manifest";
 import { compilerInputForModel, type CompilerInput } from "../session/derive";
@@ -49,11 +53,34 @@ function logCompileAttempt(
   );
 }
 
+export type CompilerPromptVersion = "v1.4" | "v2.0";
+
+/** Default v2.0; set COMPILER_PROMPT_VERSION=v1.4 to compare against the legacy prompt. */
+export function resolveCompilerPromptVersion(
+  override?: CompilerPromptVersion,
+): CompilerPromptVersion {
+  if (override) return override;
+  const env = process.env.COMPILER_PROMPT_VERSION?.trim();
+  if (env === "v1.4") return "v1.4";
+  return "v2.0";
+}
+
+function promptForVersion(version: CompilerPromptVersion): {
+  system: string;
+  promptVersion: string;
+} {
+  if (version === "v1.4") {
+    return { system: COMPILER_PROMPT_V1_4, promptVersion: PROMPT_VERSION_V1_4 };
+  }
+  return { system: COMPILER_PROMPT_V2, promptVersion: PROMPT_VERSION_V2 };
+}
+
 export async function compileManifest(
   compilerInput: CompilerInput,
   options?: {
     client?: CompileMessageClient;
     onAttempt?: (info: CompileAttemptInfo) => void;
+    promptVersion?: CompilerPromptVersion;
   },
 ): Promise<Manifest> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -63,6 +90,9 @@ export async function compileManifest(
 
   const model = process.env.LLM_MODEL ?? "claude-sonnet-4-6";
   const client = options?.client ?? new Anthropic({ apiKey: apiKey! });
+  const version = resolveCompilerPromptVersion(options?.promptVersion);
+  const { system } = promptForVersion(version);
+  const expectedThetaSteps = compilerInput.skeleton.steps;
 
   let userMessage = JSON.stringify(compilerInputForModel(compilerInput));
   let lastErrors: string[] = [];
@@ -74,7 +104,7 @@ export async function compileManifest(
       model,
       max_tokens: 16_000,
       temperature: 0.2,
-      system: COMPILER_PROMPT_V1_4,
+      system,
       messages: [{ role: "user", content: userMessage }],
     });
 
@@ -112,7 +142,7 @@ export async function compileManifest(
       console.error(`normalize: ${action}`);
     }
 
-    const result = validateManifest(normalized.manifest);
+    const result = validateManifest(normalized.manifest, { expectedThetaSteps });
     if (result.ok) {
       for (const warning of result.warnings) {
         console.error(`validate: ${warning}`);
@@ -161,4 +191,5 @@ export async function compileManifest(
   );
 }
 
-export { PROMPT_VERSION };
+export const PROMPT_VERSION = PROMPT_VERSION_V2;
+export { PROMPT_VERSION_V1_4, PROMPT_VERSION_V2 };

@@ -2,7 +2,7 @@ import type { Intake } from "../contracts/intake";
 
 /** Golden fixtures intentionally contain no `<break>` SSML tags (intake layer only). */
 
-export const intake40Min: Intake = {
+export const intake45Min: Intake = {
   goal_statement: "The senior engineer role at Meridian Labs is mine now.",
   localization: {
     timeframe: "90d",
@@ -25,19 +25,30 @@ export const intake40Min: Intake = {
     { action: "Update LinkedIn headline before Monday", deadline: "2026-07-14" },
   ],
   session: {
-    duration_min: 40,
+    duration_min: 45,
+    middle_start: 2,
+    middle_count: 10,
+    posture: "sitting",
     entrainment_mode: "isochronic",
     senses_emphasis: ["sight", "touch", "sound"],
   },
 };
 
-export const intake20Min: Intake = {
-  ...intake40Min,
+/** @deprecated Use intake45Min — kept as alias during v0.5 migration. */
+export const intake40Min = intake45Min;
+
+export const intake15Min: Intake = {
+  ...intake45Min,
   session: {
-    ...intake40Min.session,
-    duration_min: 20,
+    ...intake45Min.session,
+    duration_min: 15,
+    middle_start: 2,
+    middle_count: 2,
   },
 };
+
+/** @deprecated Use intake15Min — kept as alias during v0.5 migration. */
+export const intake20Min = intake15Min;
 
 export const intakeInvalid = {
   goal_statement: "I want it",
@@ -51,7 +62,7 @@ export const intakeInvalid = {
   features: ["vague feeling", "abstract energy"],
   sync_actions: [],
   session: {
-    duration_min: 40,
+    duration_min: 45,
     entrainment_mode: "isochronic",
     senses_emphasis: ["sight"],
   },

@@ -497,7 +497,7 @@ export function WizardFlow({
           <div>
             <p className="setup-label">Duration</p>
             <p className="setup-input mt-1.5 cursor-default opacity-90">
-              40 minutes (locked) — more lengths coming in v0.5
+              45 minutes (locked) — more lengths coming in v0.5-2
             </p>
           </div>
 

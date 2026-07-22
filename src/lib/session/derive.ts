@@ -1,5 +1,11 @@
 import type { Intake } from "../contracts/intake";
-import { PACING_WPM, PHASE_BUDGET_SEC, type DurationPreset } from "../costs";
+import { PACING_WPM, type DurationPreset } from "../costs";
+import {
+  buildSessionSkeleton,
+  type Posture,
+  type SessionSkeleton,
+} from "../compiler/skeleton";
+import { formatSkeletonForPrompt } from "../compiler/prompt.v2";
 import {
   toSpeakableText,
   normalizeDeadlineValue,
@@ -18,10 +24,20 @@ export const DEFAULT_PERSON_CONFIG = {
   theta_declarations: "first" as const,
 };
 
+export type PhaseBudgetSec = {
+  beta: number;
+  alpha: number;
+  theta: number;
+  gamma: number;
+};
+
 export interface DerivedSession {
   duration_min: DurationPreset;
-  phase_budget_sec: (typeof PHASE_BUDGET_SEC)[DurationPreset];
-  entrainment_plan: typeof DEFAULT_ENTRAINMENT_PLAN;
+  phase_budget_sec: PhaseBudgetSec;
+  entrainment_plan: typeof DEFAULT_ENTRAINMENT_PLAN | Omit<
+    (typeof DEFAULT_ENTRAINMENT_PLAN)[number],
+    never
+  >[];
   person_config: typeof DEFAULT_PERSON_CONFIG;
   pacing: {
     beta_wpm: number;
@@ -29,14 +45,39 @@ export interface DerivedSession {
     theta_wpm: number;
     gamma_wpm: number;
   };
+  posture: Posture;
+  middle_start: number;
+  middle_count: number;
+}
+
+function entrainmentPlanForBudget(budget: PhaseBudgetSec): DerivedSession["entrainment_plan"] {
+  if (budget.beta === 0) {
+    return DEFAULT_ENTRAINMENT_PLAN.filter((entry) => entry.phase !== "beta");
+  }
+  return DEFAULT_ENTRAINMENT_PLAN;
+}
+
+export function skeletonFromIntake(intake: Intake): SessionSkeleton {
+  return buildSessionSkeleton({
+    length_min: intake.session.duration_min,
+    middle_start: intake.session.middle_start,
+    middle_count: intake.session.middle_count,
+    posture: intake.session.posture,
+  });
 }
 
 export function deriveSessionFromIntake(intake: Intake): DerivedSession {
-  const duration_min = intake.session.duration_min;
+  const skeleton = skeletonFromIntake(intake);
+  const phase_budget_sec: PhaseBudgetSec = {
+    beta: skeleton.phase_budget.beta_sec,
+    alpha: skeleton.phase_budget.alpha_sec,
+    theta: skeleton.phase_budget.theta_sec,
+    gamma: skeleton.phase_budget.gamma_sec,
+  };
   return {
-    duration_min,
-    phase_budget_sec: PHASE_BUDGET_SEC[duration_min],
-    entrainment_plan: DEFAULT_ENTRAINMENT_PLAN,
+    duration_min: skeleton.length_min,
+    phase_budget_sec,
+    entrainment_plan: entrainmentPlanForBudget(phase_budget_sec),
     person_config: DEFAULT_PERSON_CONFIG,
     pacing: {
       beta_wpm: PACING_WPM.beta,
@@ -44,6 +85,9 @@ export function deriveSessionFromIntake(intake: Intake): DerivedSession {
       theta_wpm: PACING_WPM.theta,
       gamma_wpm: PACING_WPM.gamma,
     },
+    posture: skeleton.posture,
+    middle_start: intake.session.middle_start,
+    middle_count: intake.session.middle_count,
   };
 }
 
@@ -70,6 +114,8 @@ export interface CompilerInput {
   senses_emphasis: string[];
   aos_layer?: Intake["session"]["aos_layer"];
   session: DerivedSession;
+  /** Server-owned skeleton; stripped from model payload and re-injected formatted. */
+  skeleton: SessionSkeleton;
 }
 
 function snapshotIntakeFields(intake: Intake): CompilerIntakeSnapshot {
@@ -86,13 +132,19 @@ function snapshotIntakeFields(intake: Intake): CompilerIntakeSnapshot {
 
 export function compilerInputForModel(
   input: CompilerInput,
-): Omit<CompilerInput, "raw"> {
-  const { raw, ...modelInput } = input;
+): Omit<CompilerInput, "raw" | "skeleton"> & {
+  skeleton: ReturnType<typeof formatSkeletonForPrompt>;
+} {
+  const { raw, skeleton, ...modelInput } = input;
   void raw;
-  return modelInput;
+  return {
+    ...modelInput,
+    skeleton: formatSkeletonForPrompt(skeleton),
+  };
 }
 
 export function buildCompilerInput(intake: Intake, goalVersionId: string): CompilerInput {
+  const skeleton = skeletonFromIntake(intake);
   const session = deriveSessionFromIntake(intake);
   const raw = snapshotIntakeFields(intake);
 
@@ -115,5 +167,6 @@ export function buildCompilerInput(intake: Intake, goalVersionId: string): Compi
     senses_emphasis: intake.session.senses_emphasis,
     ...(intake.session.aos_layer ? { aos_layer: intake.session.aos_layer } : {}),
     session,
+    skeleton,
   };
 }

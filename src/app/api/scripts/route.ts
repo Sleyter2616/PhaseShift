@@ -3,7 +3,6 @@ import { NextResponse } from "next/server";
 import {
   availableMinutes,
   minutesCost,
-  SESSION_LENGTH_MINUTES,
   type MinutePools,
 } from "@/lib/billing/minutes";
 import {
@@ -12,7 +11,7 @@ import {
   refundMinutesBreakdown,
 } from "@/lib/billing/refund-minutes";
 import { createScriptBodySchema } from "@/lib/contracts/intake";
-import { PROMPT_VERSION } from "@/lib/compiler/prompt.v1.4";
+import { PROMPT_VERSION } from "@/lib/compiler/compile";
 import { getServiceClient } from "@/lib/db/service-client";
 import { inngest } from "@/inngest/client";
 import { buildCompilerInput } from "@/lib/session/derive";
@@ -99,7 +98,8 @@ export async function POST(request: Request) {
     }
 
     const isOwnVoice = voiceProfileId != null;
-    const generationCost = minutesCost(SESSION_LENGTH_MINUTES, isOwnVoice);
+    const sessionLengthMin = intake.session.duration_min;
+    const generationCost = minutesCost(sessionLengthMin, isOwnVoice);
     const ttsModelId = defaultTtsModelIdForScript(voiceProfileId);
 
     const { data: poolsRow } = await supabase
@@ -207,7 +207,7 @@ export async function POST(request: Request) {
 
     if (spendError) {
       if (isInsufficientMinutesError(spendError)) {
-        const stockCost = minutesCost(SESSION_LENGTH_MINUTES, false);
+        const stockCost = minutesCost(sessionLengthMin, false);
         await supabase
           .from("scripts")
           .update({ status: "failed", error_message: "insufficient_minutes" })

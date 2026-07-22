@@ -1,4 +1,12 @@
 import { z } from "zod";
+import {
+  LENGTHS,
+  SkeletonValidationError,
+  selectableMiddleCount,
+  validateStepSelection,
+  type Posture,
+  type SessionLengthMin,
+} from "../compiler/skeleton";
 
 const TIMEFRAME_PRESETS = ["30d", "60d", "90d"] as const;
 
@@ -156,14 +164,57 @@ const syncActionSchema = z.object({
   deadline: z.string().optional(),
 });
 
-const sessionPrefsSchema = z.object({
-  duration_min: z.literal(20).or(z.literal(30)).or(z.literal(40)).or(z.literal(60)).default(40),
-  entrainment_mode: z.enum(["binaural", "isochronic"]).default("isochronic"),
-  senses_emphasis: z
-    .array(z.string().min(1))
-    .min(2, "senses_emphasis must include at least 2 senses"),
-  aos_layer: z.enum(["ego", "self", "persona", "shadow"]).optional(),
-});
+const lengthMinSchema = z
+  .union([
+    z.literal(10),
+    z.literal(15),
+    z.literal(30),
+    z.literal(45),
+  ])
+  .default(45);
+
+const sessionPrefsSchema = z
+  .object({
+    /** Session length in minutes (ladder: 10 | 15 | 30 | 45). */
+    duration_min: lengthMinSchema,
+    /** Alias accepted on create; normalized onto duration_min. */
+    length_min: z
+      .union([z.literal(10), z.literal(15), z.literal(30), z.literal(45)])
+      .optional(),
+    middle_start: z.number().int().min(2).max(11).optional(),
+    middle_count: z.number().int().min(1).max(10).optional(),
+    posture: z.enum(["sitting", "lying"]).default("sitting"),
+    entrainment_mode: z.enum(["binaural", "isochronic"]).default("isochronic"),
+    senses_emphasis: z
+      .array(z.string().min(1))
+      .min(2, "senses_emphasis must include at least 2 senses"),
+    aos_layer: z.enum(["ego", "self", "persona", "shadow"]).optional(),
+  })
+  .transform((session) => {
+    const duration_min = (session.length_min ?? session.duration_min) as SessionLengthMin;
+    const middle_count = session.middle_count ?? selectableMiddleCount(duration_min);
+    const middle_start = session.middle_start ?? 2;
+    return {
+      duration_min,
+      middle_start,
+      middle_count,
+      posture: session.posture as Posture,
+      entrainment_mode: session.entrainment_mode,
+      senses_emphasis: session.senses_emphasis,
+      ...(session.aos_layer ? { aos_layer: session.aos_layer } : {}),
+    };
+  })
+  .superRefine((session, ctx) => {
+    try {
+      validateStepSelection(session.duration_min, session.middle_start, session.middle_count);
+    } catch (error) {
+      const message =
+        error instanceof SkeletonValidationError
+          ? error.message
+          : "invalid step selection for session length";
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message });
+    }
+  });
 
 export const intakeSchema = z.object({
   goal_statement: z
@@ -202,11 +253,17 @@ export const intakeSchema = z.object({
     .min(1, "sync_actions must have 1-5 items")
     .max(5, "sync_actions must have 1-5 items"),
   session: sessionPrefsSchema.default({
-    duration_min: 40,
+    duration_min: 45,
+    middle_start: 2,
+    middle_count: 10,
+    posture: "sitting",
     entrainment_mode: "isochronic",
     senses_emphasis: ["sight", "touch"],
   }),
 });
+
+export { LENGTHS };
+export type { SessionLengthMin, Posture };
 
 export type Intake = z.infer<typeof intakeSchema>;
 

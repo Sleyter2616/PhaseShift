@@ -6,7 +6,7 @@ import {
   validateWizardStep,
   type WizardDraft,
 } from "./wizard";
-import { intake40Min } from "../fixtures/intake";
+import { intake45Min } from "../fixtures/intake";
 
 describe("rewriteGoalPresentTense", () => {
   it("strips I want and capitalizes the remainder", () => {
@@ -30,17 +30,20 @@ describe("validateWizardStep", () => {
   function fullDraft(): WizardDraft {
     return {
       ...EMPTY_WIZARD_DRAFT,
-      goal_statement: intake40Min.goal_statement,
-      localization: intake40Min.localization,
-      triangulation: intake40Min.triangulation,
-      not_list: intake40Min.not_list,
-      wrong_pulls: intake40Min.wrong_pulls,
-      features: intake40Min.features,
-      sync_actions: intake40Min.sync_actions,
+      goal_statement: intake45Min.goal_statement,
+      localization: intake45Min.localization,
+      triangulation: intake45Min.triangulation,
+      not_list: intake45Min.not_list,
+      wrong_pulls: intake45Min.wrong_pulls,
+      features: intake45Min.features,
+      sync_actions: intake45Min.sync_actions,
       session: {
-        duration_min: 40,
-        entrainment_mode: intake40Min.session.entrainment_mode,
-        senses_emphasis: intake40Min.session.senses_emphasis,
+        duration_min: 45,
+        middle_start: 2,
+        middle_count: 10,
+        posture: "sitting",
+        entrainment_mode: intake45Min.session.entrainment_mode,
+        senses_emphasis: intake45Min.session.senses_emphasis,
       },
     };
   }
@@ -57,8 +60,8 @@ describe("validateWizardStep", () => {
     expect(validateWizardStep(1, draft)).toMatch(/present-tense/i);
   });
 
-  it("draftToIntake matches golden 40-min fixture", () => {
+  it("draftToIntake matches golden 45-min fixture", () => {
     const draft = fullDraft();
-    expect(draftToIntake(draft)).toEqual(intake40Min);
+    expect(draftToIntake(draft)).toEqual(intake45Min);
   });
 });
