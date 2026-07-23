@@ -1,10 +1,19 @@
 # PhaseShift
 
-Reality-engineering meditation app — guided self-hypnosis with per-segment TTS, client-side entrainment layering, and iterative triangulation loops.
+Reality-engineering meditation app — guided self-hypnosis with per-segment TTS, client-side entrainment layering, variable session lengths, and iterative triangulation loops.
 
-See the full execution plan in [`docs/blueprint.md`](docs/blueprint.md).
+See the full execution plan in [`docs/blueprint.md`](docs/blueprint.md). Agent operating rules: [`AGENTS.md`](AGENTS.md).
 
 **Production deploy:** see [`DEPLOY.md`](DEPLOY.md) (Vercel env vars, Supabase auth URLs, Inngest Cloud, Stripe live webhook). Do not deploy from this README — connect Vercel manually.
+
+## Features (current)
+
+- **Variable session lengths:** 10 / 15 / 30 / 45 minutes (40 retired). Phase budgets are **server-computed** (`src/lib/compiler/skeleton.ts`).
+- **Step model B:** Visualize (1) + Closure (12) bookends; contiguous middle steps from 2..11, count capped by length.
+- **Compiler prompt v2.0** consumes the skeleton (budgets, steps, posture, counted-sequence timings). Fallback: `COMPILER_PROMPT_VERSION=v1.4`.
+- **Minutes billing:** two-pool model — subscription minutes (monthly) + top-up minutes (never expire); cost = `length_min ×` stock `1×` / own-voice `2×`.
+- **Sentry** error tracking for the App Router (`@sentry/nextjs`).
+- Per-segment ElevenLabs TTS with content-hash dedupe; client-side binaural/isochronic entrainment; Inngest generation pipeline.
 
 ## Stack
 
@@ -12,16 +21,17 @@ See the full execution plan in [`docs/blueprint.md`](docs/blueprint.md).
 - **Auth:** Supabase Auth via `@supabase/ssr` (cookie sessions, RLS-scoped clients)
 - **Jobs:** Inngest (generation pipeline)
 - **Database:** Supabase (Postgres + Storage)
-- **LLM:** Anthropic Claude (compiler); **TTS:** ElevenLabs via raw `fetch` (Phase 2; `selfhost` mock for offline CI)
+- **LLM:** Anthropic Claude (compiler); **TTS:** ElevenLabs via raw `fetch` (`selfhost` mock for offline CI)
+- **Observability:** Sentry (`SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN`)
 - **Package manager:** pnpm (Node 22 LTS via `.nvmrc`)
 
 ## Prerequisites
 
 - Node.js ≥ 22 (`nvm use`)
 - pnpm 9+
-- Hosted Supabase dev project with migrations `0001`–`0008` applied
+- Hosted Supabase project with migrations through `0012_minutes.sql` applied (conductor applies migrations — see `AGENTS.md`)
 - [Anthropic API key](https://console.anthropic.com/)
-- [ElevenLabs API key](https://elevenlabs.io/) (Phase 2 live synthesis; optional when `TTS_PROVIDER=selfhost`)
+- [ElevenLabs API key](https://elevenlabs.io/) (optional when `TTS_PROVIDER=selfhost`)
 - [Inngest dev server](https://www.inngest.com/docs/local-development)
 
 ## Environment
@@ -34,20 +44,22 @@ Copy `.env.example` to `.env.local` and fill in:
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Browser + user-scoped server client |
 | `SUPABASE_SERVICE_ROLE_KEY` | Server-only admin (signed URLs, refunds, jobs) |
 | `ANTHROPIC_API_KEY` | Claude compiler |
+| `COMPILER_PROMPT_VERSION` | Optional; default `v2.0`. Set `v1.4` for legacy prompt |
 | `ELEVENLABS_API_KEY` | ElevenLabs TTS (live synthesis) |
-| `ELEVENLABS_VOICES_API_KEY` | ElevenLabs instant voice clone (`POST /api/voice`); required for real cloning |
+| `ELEVENLABS_VOICES_API_KEY` | Instant voice clone (`POST /api/voice`) |
 | `ELEVENLABS_STOCK_VOICE_ID` | Default stock voice for `POST /api/scripts` |
 | `ELEVENLABS_MODEL_ID` | Default `eleven_flash_v2_5` |
 | `TTS_PROVIDER` | `elevenlabs` (default) or `selfhost` for zero ElevenLabs spend |
 | `LLM_MODEL` | Default `claude-sonnet-4-6` |
-| `DEV_USER_PASSWORD` | Optional; seed script sets dev user password (printed if unset) |
+| `NEXT_PUBLIC_SENTRY_DSN` / `SENTRY_DSN` | Optional error tracking |
+| `DEV_USER_PASSWORD` | Optional; seed script sets dev user password |
 | `INNGEST_DEV` | Set to `1` for local Dev Server; **unset in prod** |
-| `INNGEST_EVENT_KEY` / `INNGEST_SIGNING_KEY` | Inngest Cloud (**prod-only**; leave empty locally when `INNGEST_DEV=1`) |
+| `INNGEST_EVENT_KEY` / `INNGEST_SIGNING_KEY` | Inngest Cloud (**prod-only**) |
 | `STRIPE_*` | Test keys locally; **live** keys + Price IDs in prod (see [`DEPLOY.md`](DEPLOY.md)) |
 
 ## Local development
 
-> **Cost warning:** A full 40-minute generation synthesizes every segment via ElevenLabs and can consume substantial API credits. Set `TTS_PROVIDER=selfhost` for **zero ElevenLabs spend** on acceptance runs (LLM compiler cost still applies, ~$0.25 per generation).
+> **Cost warning:** A full generation synthesizes every segment via ElevenLabs. Set `TTS_PROVIDER=selfhost` for **zero ElevenLabs spend** on acceptance runs (LLM compiler cost still applies).
 
 ### 1. Install and test (offline)
 
@@ -58,7 +70,7 @@ pnpm typecheck && pnpm lint && pnpm test
 
 ### 2. Apply migrations
 
-Apply `supabase/migrations/0001` through `0010` on your hosted Supabase project (including `0007_auth.sql` for the signup profile trigger and `refund_credits`, `0008_voice_bucket.sql` for the `voice-samples` storage bucket, `0009_billing.sql`, and `0010_lock_trigger_fn.sql`).
+Ask the conductor to apply `supabase/migrations/` through `0012` on your hosted project. Agents do not apply schema directly (`AGENTS.md`).
 
 ### 3. Seed dev user
 
@@ -78,26 +90,22 @@ pnpm dev
 npx inngest-cli@latest dev -u http://localhost:3000/api/inngest
 ```
 
-With `INNGEST_DEV=1`, the app talks to the local Dev Server and does not need `INNGEST_EVENT_KEY` / `INNGEST_SIGNING_KEY`. In production those keys are required and `INNGEST_DEV` must be unset — see [`DEPLOY.md`](DEPLOY.md).
-
 ### 5. Sign in and browse scripts
 
-Open `http://localhost:3000` → redirects to `/login` or `/scripts`. After sign-in, `/scripts` lists your scripts with links to playback.
+Open `http://localhost:3000` → redirects to `/login` or `/scripts`.
 
 ### 6. Request generation (authenticated)
-
-Sign in in the browser, then POST with your session cookie (or use a REST client that forwards cookies):
 
 ```bash
 curl -s -X POST http://localhost:3000/api/scripts \
   -H "Content-Type: application/json" \
   -b "your-session-cookies" \
-  -d "$(pnpm tsx -e "import { intake40Min } from './src/lib/fixtures/intake.ts'; process.stdout.write(JSON.stringify(intake40Min))")"
+  -d "$(pnpm tsx -e "import { intake45Min } from './src/lib/fixtures/intake.ts'; process.stdout.write(JSON.stringify(intake45Min))")"
 ```
 
-With `TTS_PROVIDER=selfhost`, generation enqueues without ElevenLabs API spend. Credit cost depends on the TTS model: Flash stock voice = 1 credit; clone / multilingual v2 = 2 credits (`creditsPerGeneration` in `src/lib/billing/plans.ts`).
+Defaults: **45 min**, full middle steps, sitting. Override with `session.duration_min` / `length_min` (`10|15|30|45`), `middle_start`, `middle_count`, `posture`.
 
-Expect `202` with `{ "script_id": "..." }`, or `402` with `{ "error": "insufficient_credits" }`.
+Minutes cost = `length_min ×` (stock `1` | own-voice `2`). Expect `202` with `{ "script_id": "..." }`, or `402` with `{ "error": "insufficient_minutes" }`.
 
 ### 7. Watch progress
 
@@ -110,29 +118,23 @@ pnpm verify:phase1 <script_id>
 pnpm resynth:check <script_id>
 ```
 
-### 9. RLS and credits acceptance (after 0007 applied)
+### 9. RLS and minutes acceptance
 
 ```bash
 pnpm rls:e2e
-pnpm credits:concurrency
+pnpm minutes:concurrency
 ```
 
-Both print `PASS`/`FAIL` lines and clean up throwaway users.
+### Billing
 
-### Billing (after `0009_billing` applied)
+Stripe Price IDs in `.env.local`:
 
-Create Products and Prices in the [Stripe Dashboard](https://dashboard.stripe.com/test/products) (test mode), then paste Price IDs into `.env.local`:
-
-- `STRIPE_PRICE_TOPUP` — one-time $6 top-up (1 credit)
-- `STRIPE_PRICE_GUIDED` — Guided $29/mo subscription
-- `STRIPE_PRICE_PRACT` — Practitioner $49/mo subscription
-- `STRIPE_WEBHOOK_SECRET` — from `stripe listen --forward-to localhost:3000/api/webhooks/stripe`
-- `NEXT_PUBLIC_APP_URL` — e.g. `http://localhost:3000`
-
-Signed-in users manage balance at `/billing`. Webhook fulfillment is idempotent via `stripe_events` (D26).
+- `STRIPE_PRICE_TOPUP` — **$8 / 80 minutes** (never expire)
+- `STRIPE_PRICE_GUIDED` — Guided **$29/mo = 240 minutes**
+- `STRIPE_PRICE_PRACT` — Practitioner **$49/mo = 640 minutes**
 
 ```bash
-pnpm billing:sim   # requires dev server + test Stripe keys; prints PASS/FAIL
+pnpm billing:sim   # or minutes billing sim — see package.json scripts
 ```
 
 ### 10. Session playback
@@ -141,44 +143,15 @@ pnpm billing:sim   # requires dev server + test Stripe keys; prints PASS/FAIL
 http://localhost:3000/session/<script_id>
 ```
 
-Requires sign-in; foreign scripts return 404 via RLS.
-
-## Phase 4b — Intake wizard and voice onboarding
+## Intake wizard and voice
 
 ### Intake wizard (`/wizard`)
 
-Seven-step client flow (auth required). Per-step validation uses partial Zod schemas from `src/lib/contracts/intake.ts`; submit runs full `intakeSchema.parse` then `POST /api/scripts`.
-
-- Step 7 locks duration at **40 minutes** (v0 preset only).
-- Optional `voice_profile_id` in the POST body selects an owned `ready` voice profile; synthesis uses `provider_voice_id` with `asset_scope: user`.
-- `402 insufficient_credits` renders inline on step 7; `202` redirects to `/dev/scripts/<id>`.
+Seven-step client flow. API accepts variable length + step selection; **wizard UI for length/middle steps lands in v0.5-2** (defaults remain 45 / full arc / sitting for now).
 
 ### Voice clone (`/voice`)
 
-Consent screen (own-voice-only, in-app recording, no uploads) → server action sets `voice_profiles.consent_confirmed_at` and `status: pending` → ~90s guided reading with `MediaRecorder` → `POST /api/voice` stores sample to `voice-samples/{user_id}/`, runs ElevenLabs IVC (`ELEVENLABS_VOICES_API_KEY` required; returns 422 if unset). `PATCH /api/voice` retries clone from the stored sample.
-
-When `status: ready`, the wizard step 7 voice selector shows **My voice**.
-
-### Scripts list
-
-**New script** links to `/wizard`. The golden-fixture shortcut button appears only when `NODE_ENV === "development"`.
-
-## Phase 3 — Session playback notes
-
-### Desktop smoke test
-
-1. Begin → **Start audio** → voice over entrainment tone bed.
-2. Listen for beat glide at the alpha→theta phase boundary.
-3. Pause / resume.
-4. End → rate alertness 1–5.
-
-### Device testing (iPhone Safari, secure context)
-
-```bash
-pnpm dev -- --experimental-https
-```
-
-Open `https://<your-lan-ip>:3000/session/<script_id>` and keep the screen in the foreground.
+Consent → in-app ~90s recording → Instant Voice Cloning. Own-voice generations cost **2× minutes**.
 
 ## Commands
 
@@ -187,51 +160,40 @@ Open `https://<your-lan-ip>:3000/session/<script_id>` and keep the screen in the
 | `pnpm dev` | Next.js dev server |
 | `pnpm typecheck` | `tsc --noEmit` |
 | `pnpm lint` | ESLint |
-| `pnpm test` | Vitest unit tests |
-| `pnpm seed:dev` | Create dev auth user + profile (100 credits) |
-| `pnpm rls:e2e` | RLS isolation acceptance script |
-| `pnpm credits:concurrency` | `spend_credits` FOR UPDATE lock proof |
+| `pnpm test` | Vitest unit tests (offline) |
+| `pnpm seed:dev` | Create dev auth user + profile |
+| `pnpm rls:e2e` | RLS isolation acceptance |
+| `pnpm minutes:concurrency` | `spend_minutes` FOR UPDATE lock proof |
 | `pnpm verify:phase1 <id>` | Phase 1 acceptance checks |
 | `pnpm resynth:check <id>` | Dedupe idempotency check |
-| `pnpm retry:synthesis <id>` | Re-synthesize a failed script with corrected voice identity (no recompile) |
-| `pnpm tts:sample <voiceId> [modelId]` | S1 bake-off: ~75s excerpt MP3 |
 
 ## Repo map
 
 ```
 src/
-  app/api/scripts/        POST intake (auth + spend_credits), GET manifest
-  app/api/voice/          POST voice sample upload + clone (auth, FormData)
-  app/api/inngest/        Inngest serve endpoint (force-dynamic, Vercel serverless)
-  app/api/webhooks/stripe Stripe webhook (force-dynamic)
+  app/api/scripts/        POST intake (auth + spend_minutes), GET manifest
+  app/api/voice/          Voice sample upload + clone
+  app/api/inngest/        Inngest serve endpoint
+  app/api/webhooks/stripe Stripe webhook
   app/billing/            Checkout / portal UI
-  app/login/              Sign-in / sign-up
-  app/scripts/            User's script list (RLS-scoped)
-  app/wizard/             7-step intake wizard (v0: 40 min locked)
-  app/voice/              Voice-clone consent + in-app recording
-  app/session/[scriptId]/ Server-loaded manifest + client player
-  app/dev/scripts/[id]/   Dev status page (poll)
-  lib/supabase/           @supabase/ssr browser/server/middleware clients
-  lib/auth/               Session helpers, ownership checks
-  lib/audio/              EntrainmentEngine, scheduler, JIT decode window
-  lib/billing/            Plans, Stripe client, webhook fulfillment
-  lib/playback/           Shared manifest loader
-  inngest/functions/      generate-script, synthesize-segment
-  lib/compiler/           Claude compile + retry
+  app/wizard/             7-step intake wizard
+  app/session/[scriptId]/ Player
+  lib/compiler/           skeleton.ts, prompt.v2.ts (+ immutable v1.x), compile
+  lib/billing/            minutes.ts (two-pool), Stripe helpers
   lib/contracts/          intake + manifest Zod
-  lib/pipeline/           segment derivation, dedupe, reconcile
-  lib/tts/                ElevenLabs + selfhost providers
-scripts/                  seed, rls-e2e, credits-concurrency, verify
-supabase/migrations/      0001–0010
+  lib/sentry/             capture helpers
+scripts/                  seed, verify, minutes-concurrency
+supabase/migrations/      0001–0012
+AGENTS.md                 Coding-agent operating rules
 ```
 
 ## Deploy
 
-See **[`DEPLOY.md`](DEPLOY.md)** for the full production checklist (Vercel env list, Supabase Site URL / redirects, Inngest app connection, Stripe live webhook). This repo does not auto-deploy.
+See **[`DEPLOY.md`](DEPLOY.md)**.
 
 ## Roadmap
 
-See **[`docs/blueprint.md` §6](docs/blueprint.md)**.
+See **[`docs/blueprint.md` §6](docs/blueprint.md)**. v0 (Phases 0–10) is complete; **v0.5** is the Customizable Protocol release.
 
 ## License
 

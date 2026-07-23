@@ -13,7 +13,7 @@ Companion to Master Prompt v2. Every section below is buildable as written. Stac
 | 2   | Synthesis granularity   | Per-segment TTS with content-hash dedupe                                                                                 | Enables Iterative Triangulation regens at ~40% of full cost; ElevenLabs request limits force chunking anyway; per-segment timing data feeds the scheduler                                                       |
 | 3   | LLM + TTS orchestration | Inngest (or Trigger.dev) jobs between Next.js and the APIs                                                               | Retries, fan-out, rate-limit handling, no long-running request cycles; Supabase alone has no real queue                                                                                                         |
 | 4   | Hosting                 | Vercel + Supabase + Inngest                                                                                              | With client-side layering there is no server-side audio processing, so AWS buys nothing at this stage                                                                                                           |
-| 5   | Pricing                 | Hybrid: subscription base + metered generation credits                                                                   | Playback is near-zero marginal cost and must feel unlimited (daily habit); generation costs real dollars per session and must be metered                                                                        |
+| 5   | Pricing                 | Hybrid: subscription base + metered **minutes** (two-pool)                                                               | Playback is near-zero marginal cost and must feel unlimited (daily habit); generation costs real dollars per session and is metered by `length_min × voice_multiplier`                                                                          |
 
 
 ---
@@ -28,12 +28,15 @@ Intake Wizard (7 screens)
       | intake JSON (Zod-validated client + server)
       v
 POST /api/scripts
-      |  writes goal_version + script(status=generating), returns script_id immediately
+      |  validates intake (length + contiguous middle steps + posture)
+      |  builds server skeleton (phase budgets, theta step timings, counted sequences)
+      |  spends minutes (subscription-first), writes goal_version + script(status=generating)
+      |  returns script_id immediately
       v
 Inngest job: generate-script
       |
-      |-- step 1: Claude call (compiler system prompt + intake vars)
-      |-- step 2: Zod-validate manifest; on fail, 1 retry with validator errors appended
+      |-- step 1: Claude call (prompt v2.0 + intake + skeleton givens; v1.4 fallback via env)
+      |-- step 2: Zod-validate manifest against skeleton steps/budgets; 1 retry with errors
       |-- step 3: insert script_segments; hash-diff against audio_files (dedupe_key)
       |-- step 4: fan out synthesize-segment jobs for CHANGED segments only
       |             (concurrency 3-5, exponential backoff on 429)
@@ -98,7 +101,7 @@ dedupe_key = sha256(elevenlabs_voice_id | model_id | voice_settings_json | segme
 - Note: inline break tags are billable characters. Budget for them (Section 5).
 
 **C. Job orchestration outside the request cycle.**
-A 40-minute session is ~90-140 TTS seconds of API work plus a 15-30 second Claude call. None of that belongs in a route handler regardless of platform timeouts. Inngest gives you per-step retries, fan-out with a concurrency cap matched to your ElevenLabs plan, dead-letter visibility, and status writes the client consumes over Realtime. Trigger.dev is an equivalent choice; pgmq on Supabase works if you want zero extra vendors, at the cost of building retry semantics yourself.
+A full-length session (up to 45 minutes) is substantial TTS API work plus a Claude compile. None of that belongs in a route handler regardless of platform timeouts. Inngest gives you per-step retries, fan-out with a concurrency cap matched to your ElevenLabs plan, dead-letter visibility, and status writes the client consumes over Realtime. Trigger.dev is an equivalent choice; pgmq on Supabase works if you want zero extra vendors, at the cost of building retry semantics yourself.
 
 ### 1.3 Audio engine
 
@@ -173,7 +176,7 @@ export class EntrainmentEngine {
 }
 ```
 
-**Scheduling.** Compute each segment's start offset from the running sum of actual_duration_sec + pause_after_ms (actuals come back from synthesis, so timing is exact, not estimated). Use a lookahead scheduler (setInterval ~200 ms, schedule 2-3 s ahead on the AudioContext clock) rather than starting all 40 minutes of sources at once.
+**Scheduling.** Compute each segment's start offset from the running sum of actual_duration_sec + pause_after_ms (actuals come back from synthesis, so timing is exact, not estimated). Use a lookahead scheduler (setInterval ~200 ms, schedule 2-3 s ahead on the AudioContext clock) rather than starting an entire session's sources at once.
 
 **Defaults.** Carrier 180-220 Hz; tone bed -18 to -24 dB under voice; isochronic is the default mode with a headphones toggle for binaural (device headphone detection is unreliable, so ask, do not sniff). AudioContext must be resumed on a user gesture (iOS requirement): the Begin Session button does it.
 
@@ -199,7 +202,7 @@ async function renderOffline(manifest: SessionManifest) {
 }
 ```
 
-Expected output size: 128 kbps MP3 is ~38 MB for 40 minutes. Cache by `script_id + render_settings_hash`, because binaural/isochronic mode, carrier, tone gain, and voice gain change the rendered result.
+Expected output size: 128 kbps MP3 is ~43 MB for 45 minutes (~38 MB for 40). Cache by `script_id + render_settings_hash`, because binaural/isochronic mode, carrier, tone gain, and voice gain change the rendered result.
 
 ### 1.4 Supabase schema (DDL)
 
@@ -214,7 +217,12 @@ create table profiles (
   id uuid primary key references auth.users on delete cascade,
   display_name text,
   tier text not null default 'trial' check (tier in ('trial','guided','practitioner')),
-  credit_balance numeric not null default 0 check (credit_balance >= 0),
+  -- Generation path uses two-pool minutes (migration 0012). credit_balance remains
+  -- for legacy credit_* tables but is RETIRED from script generation.
+  subscription_minutes integer not null default 0 check (subscription_minutes >= 0),
+  subscription_minutes_reset_at timestamptz,
+  topup_minutes integer not null default 0 check (topup_minutes >= 0),
+  credit_balance numeric not null default 0 check (credit_balance >= 0), -- retired from generation
   created_at timestamptz default now()
 );
 
@@ -342,10 +350,21 @@ create table feature_signals (
   logged_at timestamptz default now()
 );
 
+create table minutes_ledger (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references profiles(id),
+  delta integer not null,                  -- positive = grant/purchase/refund; negative = spend/reset
+  pool text not null check (pool in ('subscription', 'topup')),
+  reason text not null check (reason in ('grant', 'purchase', 'spend', 'refund', 'reset')),
+  script_id uuid references scripts(id),
+  created_at timestamptz not null default now()
+);
+
+-- Legacy credit ledger (RETIRED from generation path; kept for historical rows).
 create table credit_ledger (
   id bigint generated always as identity primary key,
   user_id uuid not null references profiles(id),
-  delta numeric not null,                  -- generation credits; negative = spend
+  delta numeric not null,
   reason text not null check (reason in ('purchase','grant','generation','regen','refund')),
   script_id uuid references scripts(id),
   created_at timestamptz default now()
@@ -368,54 +387,18 @@ create policy own_rows on goals
 
 -- goal_versions: SELECT + INSERT only. No UPDATE/DELETE policy => triangulation history is immutable.
 
--- credit_ledger: no client write policies at all. Balance is not computed by
--- locking sum(delta), because aggregates cannot be row-locked. Spends happen only
--- through a SECURITY DEFINER function that locks `profiles` and updates
--- profiles.credit_balance in the same transaction as the ledger insert.
+-- minutes_ledger: SELECT own rows only. No client write policies. Spends/grants/refunds
+-- go through SECURITY DEFINER functions that lock `profiles` FOR UPDATE, mutate
+-- subscription_minutes / topup_minutes, and insert ledger rows in the same transaction.
+-- Key functions (see supabase/migrations/0012_minutes.sql):
+--   minutes_cost(length_minutes, is_own_voice)
+--   spend_minutes(p_user, p_minutes, p_script)          -- subscription-first
+--   refund_minutes(...)
+--   grant_subscription_minutes(...)                     -- service_role; monthly reset
+--   grant_topup_minutes(...)                            -- service_role; never expire
 
-create or replace function spend_credits(p_script uuid, p_amount numeric, p_reason text default 'generation')
-returns void
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  v_user uuid := auth.uid();
-  v_balance numeric;
-begin
-  if v_user is null then
-    raise exception 'not_authenticated';
-  end if;
-  if p_amount <= 0 then
-    raise exception 'invalid_credit_amount';
-  end if;
-  if p_reason not in ('generation','regen') then
-    raise exception 'invalid_spend_reason';
-  end if;
-
-  select credit_balance into v_balance
-  from profiles
-  where id = v_user
-  for update;
-
-  if v_balance is null then
-    raise exception 'profile_not_found';
-  end if;
-  if v_balance < p_amount then
-    raise exception 'insufficient_credits';
-  end if;
-
-  update profiles
-  set credit_balance = credit_balance - p_amount
-  where id = v_user;
-
-  insert into credit_ledger(user_id, delta, reason, script_id)
-  values (v_user, -p_amount, p_reason, p_script);
-end;
-$$;
-
--- Stripe webhooks and admin grants/refunds must use the same pattern: lock the
--- profiles row, update credit_balance, then insert the positive or refund ledger row.
+-- credit_ledger / spend_credits: RETIRED from the generation path. Do not use for
+-- new script billing.
 
 -- Storage: private bucket 'audio'. Owner path policy for user assets:
 -- (storage.foldername(name))[1] = auth.uid()::text.
@@ -439,14 +422,14 @@ $$;
 
 ### 2.1 Output contract
 
-The compiler returns exactly one JSON object. Validate with Zod server-side; on failure, retry once with the validator errors appended to the conversation.
+The compiler returns exactly one JSON object. Validate with Zod server-side; on failure, retry once with the validator errors appended to the conversation. **Field names are stable** (`phases` via segment `phase`, `segments`, `step`, `target_duration_sec`, `phase_budget_sec`). What changed in v0.5-1 is **who computes** budgets and which theta steps exist — the server skeleton — not the JSON schema the model fills.
 
 ```json
 {
   "meta": {
     "goal_version_id": "uuid",
-    "total_duration_sec": 2400,
-    "phase_budget_sec": { "beta": 120, "alpha": 480, "theta": 1500, "gamma": 300 },
+    "total_duration_sec": 2700,
+    "phase_budget_sec": { "beta": 120, "alpha": 360, "theta": 1980, "gamma": 240 },
     "entrainment_plan": [
       { "phase": "beta",  "hz": 18, "glide_to": 10, "glide_sec": 45 },
       { "phase": "alpha", "hz": 10, "glide_to": 6,  "glide_sec": 60 },
@@ -465,108 +448,62 @@ The compiler returns exactly one JSON object. Validate with Zod server-side; on 
 }
 ```
 
-### 2.2 The compiler system prompt (copy-paste ready)
+When `beta` budget is `0` (10-minute sessions), omit beta segments entirely and omit beta from `entrainment_plan`.
 
-```
-You are the Phase Locking Script Compiler. You convert one structured intake object
-into a guided self-hypnosis meditation script following the Omniletheon / AOS Phase
-Locking protocol, emitted as a machine-readable segment manifest. You are a compiler,
-not an assistant: you never address the user, never explain yourself, and you output
-nothing except one valid JSON object matching the provided schema.
+### 2.2 Compiler prompts (versioned, immutable)
 
-## INPUT
-{ goal_statement, localization: {timeframe, place}, triangulation: [p1, p2, p3],
-  not_list: [...], wrong_direction_pulls: [...], features: [...],
-  sync_actions: [{action, deadline?}], senses_emphasis: [...], aos_layer?,
-  session: { duration_min, phase_budget_sec, entrainment_plan, person_config,
-             pacing: {beta_wpm, alpha_wpm, theta_wpm, gamma_wpm} } }
+Prompts live in `src/lib/compiler/prompt.vN.ts`. **Once shipped, a version is immutable** — add `prompt.vN+1.ts` instead of editing.
 
-## STRUCTURAL RULES
-1. Phase order is fixed: beta -> alpha -> theta -> gamma. Theta contains steps 1-12,
-   in order, at least one segment per step. Segments outside theta carry step: null.
-2. Word budget per segment = pacing_wpm * target_duration_sec / 60. Treat this as
-   a ceiling, not a precise duration guarantee. Aim for 85-95% of the word budget
-   so post-synthesis silence can be stretched deterministically. Per-phase sums of
-   target_duration_sec must equal phase_budget_sec.
-3. Theta step weights (% of theta time): Visualize 20, Surveil 8, Localization 6,
-   Triangulation 10, Disambiguation 10, Features 10, Recognition 6, Identify 6,
-   Synchronization 10, Approximation 4, Convergence 5, Closure 5.
-4. Pauses: inline pauses use <break time="X.Xs"/> with a hard maximum of 3.0s per
-   break (TTS constraint). Silence longer than 3s belongs in pause_after_ms, never
-   in text. Alpha and theta segments must carry at least 20% of their duration as
-   breaks plus pause_after_ms. Never pad duration with filler words.
-5. Every intake string (goal_statement, both localization fields, all three
-   triangulation items, every not_list item, every feature, every sync_action)
-   appears verbatim at least once, in its designated step.
+| Version | Role |
+| ------- | ---- |
+| **v2.0** (default) | Consumes server skeleton as GIVENS: phase budgets, selected steps + per-step `target_sec`, posture, counted-sequence beat tables. Model fills text for provided slots only. |
+| **v1.4** | Legacy full-arc prompt. Retained as fallback via `COMPILER_PROMPT_VERSION=v1.4`. |
 
-## VOICE AND PERSON
-Playback is in the user's own cloned voice.
-- beta, alpha, gamma: second person ("you").
-- theta: guidance lines in second person; every step closes with 1-3 first-person
-  present-tense declarations ("I", "my") per person_config.
-- Inside theta: present tense only. Banned: will, would, could, might, hope, wish,
-  try, want, someday.
+Authoritative prompt text: `src/lib/compiler/prompt.v2.ts` (`COMPILER_PROMPT_V2`). Do not paste divergent copies into this blueprint.
 
-## TONE
-- Hard logical ground. Concrete nouns, spatial precision, measurable references.
-  Sensory language is dense and specific, never vague.
-- Banned vocabulary: "the universe" as an agent, vibrations, energy as a substance,
-  higher self, manifest your destiny, just, maybe, perhaps, simply.
-- Esoteric terms are technical vocabulary, used only as defined: perspectival
-  collapse (deliberate lens shift), protospective horizon (imaginal future field),
-  convergence (goal interception), NooAeonic aperture (perceptual bandwidth).
-  Do not improvise new esoteric terms.
+**Structural rules (v2.0 summary):**
 
-## STEP SPECIFICATIONS (theta)
-| Step | Perspective | Horizon | Archetype | Requirements |
-|---|---|---|---|---|
-| 1 Visualize | first | protospective | trickster | Build the scene at {place} within {timeframe}. Minimum 4 senses, senses_emphasis first. One explicit timeline-traversal beat: felt movement from now to the scene. |
-| 2 Surveil | third then first | protospective | creator | Instruct the listener to speak {goal_statement} aloud, hold a 3.0s break, then restate it back. Second pass sharpens anything vague from step 1. |
-| 3 Localization | third | protospective | none | State {timeframe} and {place} verbatim. Anchor with one spatial detail and one calendar detail. |
-| 4 Triangulation | third | protospective + retrospective | none | Name all three prerequisites verbatim as three fixed points around the outcome. For any prerequisite already in motion, one retrospective line acknowledging progress. |
-| 5 Disambiguation | second | introspective | warrior | Name each not_list item and dismiss it in one clean line each. Invoke the Warrior against each wrong_direction_pull: boundary language, no aggression theater. |
-| 6 Features Extraction | third | protospective | none | Enumerate every feature verbatim as an observable near-term signal: one line each for what it looks like and where it tends to appear. |
-| 7 Recognition | first | introspective | none | Rehearse noticing each feature inside an ordinary moment of the day. |
-| 8 Identify | first | introspective | thief | First-person declarations that the visualization is arriving. Ownership language: outcomes belong to the speaker. |
-| 9 Synchronization | first + second | protospective | magician | Walk each sync_action as embodied rehearsal: the body performing it, when, where. |
-| 10 Approximation | first | protospective | none | Brief compressed re-run: one line each re-touching steps 1, 4, and 6 from the shifted, closer perspective. |
-| 11 Convergence | first | protospective collapsing to introspective | none | Interception scene at maximum sensory density. The imaginal image and the present moment close to zero distance. |
-| 12 Closure | first | introspective | thief | Felt accomplishment. Lock-in declarations. No gratitude-to-external-agent language. |
+1. Phase order beta → alpha → theta → gamma; **skip beta when `beta_sec = 0`**.
+2. Theta contains **only** `skeleton.steps` (bookended 1 + 12), in order; ≥1 segment per listed step.
+3. Per-phase sums of `target_duration_sec` equal skeleton / `session.phase_budget_sec` exactly.
+4. Counted sequences (breaths, countdowns, energizing breaths, count-ups) use **server-provided timings verbatim** — the model must not compress them.
+5. Present tense in theta; banned modal verbs; verbatim intake placement for **present** steps; ≥20% break time in alpha/theta; WPM ceilings as soft budgets.
 
-## ALPHA (induction)
-Slow breathing with extended exhales (state ratios, e.g. in 4, out 8), progressive
-muscle tension-release cycles moving feet to face, slow countdown 10 to 1. Calm
-imperative. The stated purpose: releasing tension frees nervous system resources
-for the work ahead.
+### 2.3 Duration, step model, and word budgets
 
-## GAMMA (exit)
-Energizing breath protocol (3 rounds of 20 fast nasal breaths with brief holds),
-count-up 1 to 5 with escalating physical cues, then direct the listener into
-sync_actions[0] as the immediate next physical act after the session. 140-160 wpm,
-imperative, high energy.
+**Length ladder:** `10 | 15 | 30 | 45` minutes. **40 is retired.** Source of truth: `LENGTHS` and budget tables in `src/lib/compiler/skeleton.ts`.
 
-## SELF-CHECK (run before emitting)
-1. JSON valid against schema. 2. Phase sums equal phase_budget_sec. 3. Per-segment
-word counts do not exceed the calculated budget and usually land at 85-95% of it.
-4. All intake strings present verbatim. 5. No banned tokens. 6. Theta contains all
-12 steps in order.
-If any check fails, fix and re-emit. Output only the final JSON.
-```
+**Phase budgets are SERVER-COMPUTED** via `buildPhaseBudget` / `buildSessionSkeleton`:
 
-### 2.3 Duration and word budgets
+- **beta:** elastic to zero — `0` at 10 min (orienting folds into alpha); scales mildly at longer lengths.
+- **alpha:** floor ~150s (descent must not be rushed); scales up with length.
+- **gamma:** floor ~120s (re-activation viability); scales mildly up to ~240s at 45 min.
+- **theta:** elastic remainder = `total − beta − alpha − gamma`. Must stay ≥ `60s × selected_step_count` or the length/step combo is invalid.
 
-Phase budgets by preset (seconds):
+Actual per-length table (seconds; sums = `length_min × 60`):
 
+| Length | Beta | Alpha | Theta | Gamma | Total |
+| ------ | ---- | ----- | ----- | ----- | ----- |
+| 10 min | 0    | 150   | 330   | 120   | 600   |
+| 15 min | 60   | 180   | 520   | 140   | 900   |
+| 30 min | 90   | 270   | 1260  | 180   | 1800  |
+| 45 min | 120  | 360   | 1980  | 240   | 2700  |
 
-| Preset | Beta | Alpha | Theta | Gamma |
-| ------ | ---- | ----- | ----- | ----- |
-| 20 min | 60   | 240   | 780   | 120   |
-| 30 min | 90   | 360   | 1140  | 210   |
-| 40 min | 120  | 480   | 1500  | 300   |
-| 60 min | 180  | 720   | 2340  | 360   |
+**Step model B (locked):**
 
+- The 12 steps keep fixed identity/order (1 Visualize … 12 Closure).
+- Steps **1 (Visualize)** and **12 (Closure)** are **mandatory bookends** on every session.
+- The user selects a **contiguous** middle block from steps **2..11**.
+- Middle-step **count** by length: **10 → 1**, **15 → 2**, **30 → 6**, **45 → 10** (full middle = full 12-step arc).
+- Validated by `validateStepSelection(lengthMin, middleStart, middleCount)`.
 
-Effective pacing (words per minute, silence included): beta 130, alpha 90, theta 105, gamma 150. A 40-minute session therefore budgets roughly 260 + 720 + 2,625 + 750 = ~4,355 words as an upper bound, or ~25,700 characters, plus ~1,300 characters of break tags: call it 27,000 billable characters per full generation. This number drives Section 5.
+**Theta time distribution:** `distributeThetaTime` splits `theta_sec` across **selected** steps using relative weights (Visualize heaviest; same weight intent as v1), renormalized so targets sum exactly to `theta_sec`.
+
+**Posture** (`sitting` default | `lying`): does **not** change durations. Passthrough into the prompt for body-reference language, theta depth, and gamma intensity.
+
+**Counted sequences:** `buildCountedSequence` returns explicit per-count timings with **enforced** inhale/hold/exhale/pause (or count/pause) beats. Alpha breath/countdown and gamma energizing/count-up timings are server-owned; the model must state them verbatim.
+
+Effective pacing (words per minute, silence included): beta 130, alpha 90, theta 105, gamma 150. Character/COGS estimates scale with length; minutes billing meters `length_min × voice_multiplier` (Section 5).
 
 **Post-synthesis duration reconciliation.** Do not trust the compiler to hit duration through word count. The source of truth is `actual_duration_sec` returned by synthesis. After every segment in a phase is synthesized:
 
@@ -574,6 +511,7 @@ Effective pacing (words per minute, silence included): beta 130, alpha 90, theta
 for (const phase of phases) {
   const segments = byPhase[phase];
   const budgetSec = phaseBudgetSec[phase];
+  if (budgetSec === 0) continue; // beta-absent sessions
   const voicedSec = sum(segments.map(s => s.actual_duration_sec));
   const rawPauseMs = sum(segments.map(s => s.pause_after_ms));
   const remainingMs = Math.max(0, budgetSec * 1000 - voicedSec * 1000);
@@ -584,9 +522,12 @@ for (const phase of phases) {
       s.scheduled_pause_after_ms = Math.round(s.pause_after_ms * scale);
     }
   } else {
-    const perGap = Math.round(remainingMs / Math.max(1, segments.length - 1));
+    // Distribute remainingMs across all segments including the last (D13).
+    const perGap = Math.round(remainingMs / Math.max(1, segments.length));
     for (const [i, s] of segments.entries()) {
-      s.scheduled_pause_after_ms = i === segments.length - 1 ? 0 : perGap;
+      s.scheduled_pause_after_ms = i === segments.length - 1
+        ? remainingMs - perGap * (segments.length - 1)
+        : perGap;
     }
   }
 
@@ -610,19 +551,21 @@ The playback scheduler uses `actual_duration_sec + scheduled_pause_after_ms`, no
 | 4      | wrong_pulls                                                   | chips                          | 0-3 items                                                                                    | Step 5 (Warrior) |
 | 5      | features                                                      | chips                          | 3-7; lint for observability (must contain a concrete noun)                                   | Steps 6-8        |
 | 6      | sync_actions                                                  | repeater                       | 1-5 actions, optional deadline each                                                          | Step 9           |
-| 7      | duration, entrainment_mode, voice, senses_emphasis, aos_layer | selects                        | defaults: 40 min, isochronic, at least 2 senses; aos_layer under an Advanced toggle          | meta             |
+| 7      | length, middle steps, posture, entrainment_mode, voice, senses_emphasis, aos_layer | selects          | length ∈ {10,15,30,45}; contiguous middle_start/middle_count per ladder; posture sitting\|lying; ≥2 senses | meta + skeleton |
 
 
-Design principle: chips and fixed-count inputs keep every intake item atomic, so the compiler can quote them verbatim (rule 5 in the prompt). The user's exact words appear in their own voice during the session. This is the Daath principle operationalized: reality quality reflects communication quality, so the app never paraphrases the user.
+API defaults today (wizard step-selection UI lands in **v0.5-2**): length **45**, full middle (`middle_start=2`, `middle_count=10`), posture **sitting**. Server validates via skeleton helpers and rejects invalid combos.
+
+Design principle: chips and fixed-count inputs keep every intake item atomic, so the compiler can quote them verbatim. The user's exact words appear in their own voice during the session. This is the Daath principle operationalized: reality quality reflects communication quality, so the app never paraphrases the user.
 
 ---
 
 ## 3. Visuals & Flow
 
-State progression timeline (40-min preset):
+State progression timeline (45-min full arc; shorter lengths shrink theta and may omit beta):
 
 ```
-0        2                10                                       35        40 min
+0        2                8                                        41        45 min
 |--beta--|-----alpha------|---------------theta--------------------|--gamma--|
  18 Hz -> 10 Hz --------> 6 Hz ---------------------------------> 40 Hz hold
  (glide 45s)   (glide 60s)                              (glide 30s)
@@ -652,14 +595,15 @@ The generation pipeline and audio node graphs are in Sections 1.1 and 1.3.
 | Concern            | Where it lives   | Notes                                                                                                                                                                                                                                            |
 | ------------------ | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Next.js app + PWA  | Vercel           | Service worker via serwist; cache manifest + audio segments for offline sessions                                                                                                                                                                 |
-| API routes         | Vercel functions | Thin: validate intake, insert rows, enqueue job, return script_id                                                                                                                                                                                |
+| API routes         | Vercel functions | Thin: validate intake, build skeleton, spend minutes, insert rows, enqueue job, return script_id                                                                                                                                                 |
 | LLM + TTS work     | Inngest          | All long-running work; concurrency capped to the ElevenLabs plan                                                                                                                                                                                 |
 | Auth, DB, Realtime | Supabase         | Realtime channel per script for synthesis progress                                                                                                                                                                                               |
 | Audio storage      | Supabase Storage | Private bucket, signed URLs, Smart CDN; user voice assets under `{user_id}/...`, shared stock assets under `shared/...`; TTL defaults to 24h and service worker refreshes signed URLs before expiry; body caching makes repeat plays zero-egress |
-| Billing            | Stripe           | Subscriptions + credit top-ups; webhooks write credit_ledger via service role                                                                                                                                                                    |
+| Billing            | Stripe           | Subscriptions + minute top-ups; webhooks call `grant_subscription_minutes` / `grant_topup_minutes` via service role                                                                                                                              |
+| Errors             | Sentry           | App Router instrumentation (`@sentry/nextjs`); optional locally via `SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN`                                                                                                                                      |
 
 
-Fixed infra at small scale: Vercel Pro $20 + Supabase Pro $25 + Inngest $0-20, roughly $50-70/month before TTS. Secrets (Anthropic, ElevenLabs) live server-side only.
+Fixed infra at small scale: Vercel Pro $20 + Supabase Pro $25 + Inngest $0-20, roughly $50-70/month before TTS. Secrets (Anthropic, ElevenLabs, Stripe, Sentry) live server-side only (or public DSN only where required).
 
 Move to AWS/GCP only when one of these appears: server-side mixing (ffmpeg pipelines), egress measured in terabytes (S3 + CloudFront wins), or bringing TTS in-house. Build a thin TTSProvider interface from day one so ElevenLabs can be swapped for Cartesia or PlayHT without touching the pipeline; pricing and terms in this market move quarterly.
 
@@ -667,65 +611,60 @@ Move to AWS/GCP only when one of these appears: server-side mixing (ffmpeg pipel
 
 ## 5. Monetization & Pricing Strategy
 
-### Cost model and voice-quality gate
+### Two-pool minutes model (current)
 
-Current plan math must be verified at implementation time because TTS pricing and model terms move. Working assumption from the current model: Multilingual v2 is the high-fidelity/studio path and costs roughly 2x Flash/Turbo for the same character count; Flash/Turbo remains the intended default only if own-voice clone fidelity is good enough.
+Generation is metered in **minutes**, not credits. Source of truth: `src/lib/billing/minutes.ts` + `supabase/migrations/0012_minutes.sql`.
 
-Per full 40-minute generation (~27,000 billable characters):
+| Pool | Column | Behavior |
+| ---- | ------ | -------- |
+| Subscription | `profiles.subscription_minutes` | Monthly allotment; **reset** each billing cycle via `grant_subscription_minutes` (does not accumulate unused). |
+| Top-up | `profiles.topup_minutes` | Purchased packs; **never expire**. |
 
+**Spend order:** subscription first, then topup (`spend_minutes`). Every mutation writes `minutes_ledger` rows under a `FOR UPDATE` lock on `profiles`.
 
-| Model                                         | Credits | Cost at Pro base (~$0.165/1k) | Cost at Creator base (~$0.182/1k) |
-| --------------------------------------------- | ------- | ----------------------------- | --------------------------------- |
-| Flash v2.5 candidate default                  | 13,500  | ~$2.25                        | ~$2.46                            |
-| Multilingual v2 fallback default / studio     | 27,000  | ~$4.46                        | ~$4.91                            |
-| Re-triangulation regen (~40% of chars, Flash) | ~5,400  | ~$0.90                        | ~$0.98                            |
-| Re-triangulation regen (~40% of chars, v2)    | ~10,800 | ~$1.78                        | ~$1.96                            |
+**Session cost:**
 
+```
+cost = length_min × voice_multiplier
+voice_multiplier: stock = 1×, own_voice = 2×
+```
 
-**Do not lock pricing until instant-clone fidelity is tested.** The product promise is not generic meditation audio; it is the user's own voice. Before freezing tiers, run a small eval harness:
+Examples: 10-min stock = **10**; 45-min own voice = **90**.
 
-- 10-20 users, each with the same 90-second in-app voice sample.
-- Generate matched 60-90 second script excerpts in Flash v2.5 and Multilingual v2.
-- Blind A/B ratings: voice similarity, naturalness, emotional acceptability, and “would I meditate to this daily?”
-- Ship Flash as default only if at least 80% rate it acceptable and the v2 preference gap is small. If v2 wins clearly, make v2 the default for cloned voices and keep Flash for stock/demo voices or low-cost previews.
+**SQL surface:** `minutes_cost`, `spend_minutes`, `refund_minutes`, `grant_subscription_minutes`, `grant_topup_minutes`, table `minutes_ledger`.
 
-Pricing consequence if v2 becomes default: Guided worst case roughly doubles from ~$9-10 to ~$18-20 COGS against $29. That is still workable, but thin. In that case, change Guided from 4 credits/mo to 3 credits/mo, keep re-triangulation at 0.5 credit only when the changed-character estimate stays under 12k, and reserve full 10-credit generosity for Practitioner.
+**Credits (retired from generation):** `credit_balance`, `credit_ledger`, and `spend_credits` still exist for legacy rows/tests but are **not** used by `POST /api/scripts`.
 
-Capacity: the Pro plan ($99) covers ~44 Flash or ~22 v2 full generations per month under the current working math. Start on Creator, move to Pro past ~8 full generations/month, enable usage-based billing as a buffer with an 80% usage alert.
-
-Voice cloning: Instant Voice Cloning (90s in-app sample) is the MVP path. Professional Voice Cloning is a premium upgrade only after the eval shows that users care enough to pay for the fidelity delta.
-
-### Pricing structure: hybrid (subscription + generation credits)
-
-Meter creation, not consumption. Playback must feel unlimited because daily practice is the product; generation costs real dollars and gets a credit system.
+### Pricing structure
 
 
-| Tier         | Price             | Includes                                                                                                                                                                                                                              |
-| ------------ | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Trial        | Free              | One pre-rendered demo session in a stock voice (zero marginal cost per signup), full player UX, intake preview                                                                                                                        |
-| Guided       | $29/mo or $290/yr | Instant voice clone, 4 generation credits/mo if Flash passes fidelity gate; 3 credits/mo if v2 must be default; unlimited playback; Recognition Log; re-triangulation regens at 0.5 credit when under the changed-character threshold |
-| Practitioner | $49/mo or $490/yr | 10 credits/mo, Freeform mode (custom sequencing and durations), Delta research mode, studio-quality v2 voice option, priority queue, multiple concurrent goals                                                                        |
-| Top-up       | $6 per credit     | 1 credit = one Flash generation up to 30k chars; v2 generation = 2 credits                                                                                                                                                            |
+| Tier         | Price             | Includes                                                                                                                                 |
+| ------------ | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Trial        | Free              | Demo / onboarding surfaces; generation requires minutes                                                                                  |
+| Guided       | **$29/mo**        | **240 minutes/mo** subscription pool; unlimited playback; Recognition Log                                                                |
+| Practitioner | **$49/mo**        | **640 minutes/mo**; Freeform / advanced surfaces as they ship                                                                            |
+| Top-up       | **$8 = 80 min**   | Adds to `topup_minutes`; never expires                                                                                                   |
 
 
-Margin check: if Flash passes the fidelity gate, Guided worst case is 4 Flash generations, ~$9-10 COGS against $29. If v2 must be default, Guided should drop to 3 included credits, because 4 v2 generations can push COGS toward ~$18-20. Practitioner worst case remains workable because the tier can explicitly meter v2 as 2 credits per generation. Median users generate 1-2 scripts per month and play daily, so realized margins run higher than worst case.
+Meter creation, not consumption. Playback must feel unlimited because daily practice is the product; generation burns minutes proportional to session length and voice path.
 
-**Answer to the open question (freeform paywall):** do not make Guided free. The guided guardrail product IS the paid base tier; Freeform is the Practitioner gate, alongside Delta and studio voice quality. The only free surface is the pre-rendered demo, which has zero marginal cost and demonstrates the full experience including the exit state.
+**Voice-quality note:** Instant Voice Cloning remains the MVP own-voice path. Flash vs Multilingual v2 fidelity gating still informs which TTS model clones use; that choice no longer drives a separate credit multiplier — own voice is always **2× minutes**.
 
-Why hybrid beats the alternatives: a pure subscription invites generation-heavy users to blow out COGS; pure credits make daily playback feel metered and kill the habit loop. Hybrid prices the two cost structures separately.
+Capacity planning still tracks ElevenLabs character spend separately from user-facing minutes. Enable usage-based billing as a vendor buffer with an 80% usage alert; do not expose character credits in the product UI.
 
 ---
 
 ## 6. MVP Cutline & Roadmap
 
-**v0 (weeks 1-6): the guarded core.**
-Guided mode only. Fixed 40-min template. Instant voice clone from a 90-second in-app reading (plus 2 stock voices as fallback). Isochronic default with binaural toggle. Foreground playback with wake lock. Sessions log with exit-alertness rating. Stripe single tier. Compiler prompt v1 pinned in prompt_version.
+**v0 / Phases 0–10 (COMPLETE):** Guided core through production deploy — fixed-length generation, TTS pipeline, playback, Stripe, landing, minutes migration, Sentry.
 
-**v0.5 (weeks 7-10): the loop.**
-Recognition Log with matched-feature tracking. Re-Triangulate flow with hash-diff regen. 20/30/60-minute presets.
+**v0.5 — Customizable Protocol (current):**
 
-**v1 (weeks 11-16): retention and the second tier.**
-Per-phase block editor (the state-chunking UI). Offline render + true background playback (`OfflineAudioContext -> PCM -> Worker encoder -> cached Blob -> HTMLAudioElement + MediaSession`). Practitioner tier with credit ledger and Freeform sequencing.
+- **v0.5-1 (landed):** Server-owned compiler skeleton; length ladder 10/15/30/45; step model B; posture; counted-sequence timing; prompt **v2.0**; minutes charged by length.
+- **v0.5-2 (next):** Wizard UI for length + contiguous middle-step selection + posture.
+- Later v0.5: Recognition Log / re-triangulate polish; regen copy-through mode (D8).
+
+**v1:** Offline render + true background playback; Freeform sequencing; Practitioner surfaces beyond allotment.
 
 **v1.5+: Delta research mode.**
 Design that respects the hard-logical-ground standard: the literature does not support learning novel verbal content in deep sleep, but Targeted Memory Reactivation (re-cueing material learned while awake) has real evidence. So Delta mode is replay, not programming: during Theta sessions, each first-person declaration is preceded by a short signature audio motif unique to the goal. Delta mode runs as a sleep-timer session that plays only those motifs (optionally the declarations at whisper level, capped around -30 dB) on a spaced schedule during the first ~3 hours of sleep, when slow-wave sleep dominates. Experiment design: within-subject A/B, alternating cued and silent nights over two weeks, measuring recognition-log entries per day and a morning free-recall check of the declarations. Architecture already accommodates it: delta segments carry an anchor_ref instead of text, the engine plays arbitrary buffers, and the only additions are a sleep timer and a volume cap.
@@ -738,5 +677,5 @@ Design that respects the hard-logical-ground standard: the literature does not s
 - **TTS vendor drift.** Prices, terms, and models move quarterly. The dedupe cache, Flash-default policy, and TTSProvider abstraction cap the blast radius.
 - **Voice-clone consent and abuse.** Clone only the account owner's voice, recorded in-app (no file uploads), with a timestamped consent record (voice_profiles.consent_confirmed_at). This is both an ElevenLabs terms requirement and basic liability hygiene.
 - **Safety copy.** Entrainment caution for seizure history, no use while driving or operating machinery, not a medical device, sleep-mode volume cap. Ship it in onboarding and the session start screen.
-- **Cost blowout.** Credit ledger enforced server-side via SECURITY DEFINER function; 80% usage alerts on the ElevenLabs plan; usage-based billing enabled as buffer, never as baseline.
+- **Cost blowout.** Minutes ledger enforced server-side via SECURITY DEFINER + `FOR UPDATE`; concurrency proof scripts; 80% usage alerts on the ElevenLabs plan; usage-based billing enabled as buffer, never as baseline.
 
