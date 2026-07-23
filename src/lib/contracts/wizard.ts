@@ -13,7 +13,10 @@ export interface WizardDraft {
   features: string[];
   sync_actions: { action: string; deadline?: string }[];
   session: {
-    duration_min: 40;
+    duration_min: 45;
+    middle_start: number;
+    middle_count: number;
+    posture: "sitting" | "lying";
     entrainment_mode: "binaural" | "isochronic";
     senses_emphasis: string[];
     aos_layer?: "ego" | "self" | "persona" | "shadow";
@@ -32,7 +35,10 @@ export const EMPTY_WIZARD_DRAFT: WizardDraft = {
   features: [],
   sync_actions: [{ action: "" }],
   session: {
-    duration_min: 40,
+    duration_min: 45,
+    middle_start: 2,
+    middle_count: 10,
+    posture: "sitting",
     entrainment_mode: "isochronic",
     senses_emphasis: ["sight", "touch"],
   },
@@ -82,7 +88,10 @@ export function draftToIntake(draft: WizardDraft): Intake {
     sync_actions: draft.sync_actions.filter((item) => item.action.trim().length > 0),
     session: {
       ...draft.session,
-      duration_min: 40,
+      duration_min: 45,
+      middle_start: 2,
+      middle_count: 10,
+      posture: draft.session.posture ?? "sitting",
     },
   });
 }

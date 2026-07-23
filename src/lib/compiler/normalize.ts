@@ -116,6 +116,7 @@ export function normalizeManifest(json: unknown): NormalizeResult {
     const budget = manifest.meta.phase_budget_sec[phase];
     const phaseSegments = manifest.segments.filter((segment) => segment.phase === phase);
     if (phaseSegments.length === 0) continue;
+    if (budget === 0) continue;
     rescalePhaseDurations(phaseSegments, budget, phase, actions);
   }
 

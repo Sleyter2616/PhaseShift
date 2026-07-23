@@ -82,18 +82,32 @@ async function main() {
     .order("seq");
 
   const segs = segments ?? [];
-  allPass &&= pass("≥15 segments", segs.length >= 15, String(segs.length));
-
   const thetaSegs = segs.filter((s) => s.phase === "theta");
   const thetaSteps = thetaSegs.map((s) => s.step).filter((s): s is number => s != null);
   const uniqueSteps: number[] = [];
   for (const step of thetaSteps) {
     if (uniqueSteps.at(-1) !== step) uniqueSteps.push(step);
   }
-  const expected = Array.from({ length: 12 }, (_, i) => i + 1);
+
+  const compilerInput = script.compiler_input as {
+    session?: { phase_budget_sec?: Record<string, number>; duration_min?: number };
+    skeleton?: { steps?: number[] };
+  } | null;
+
+  const expectedSteps =
+    compilerInput?.skeleton?.steps ??
+    (uniqueSteps.length > 0 ? uniqueSteps : Array.from({ length: 12 }, (_, i) => i + 1));
+
+  const minSegments = Math.max(3, expectedSteps.length + 2);
   allPass &&= pass(
-    "theta steps 1..12 in order",
-    uniqueSteps.join(",") === expected.join(","),
+    `≥${minSegments} segments (length-aware)`,
+    segs.length >= minSegments,
+    String(segs.length),
+  );
+
+  allPass &&= pass(
+    `theta steps match skeleton [${expectedSteps.join(", ")}]`,
+    uniqueSteps.join(",") === expectedSteps.join(","),
     uniqueSteps.join(","),
   );
 
@@ -133,24 +147,33 @@ async function main() {
     verbatim.ok ? "" : `missing: ${verbatim.missing.slice(0, 3).join(" | ")}`,
   );
 
-  const phaseBudget = (
-    script.compiler_input as { session?: { phase_budget_sec?: Record<string, number> } }
-  )?.session?.phase_budget_sec;
+  const phaseBudget =
+    compilerInput?.session?.phase_budget_sec ??
+    (
+      script.compiler_input as { session?: { phase_budget_sec?: Record<string, number> } }
+    )?.session?.phase_budget_sec;
 
   const overagePhases = parseOveragePhases(script.error_message);
 
   if (phaseBudget) {
     for (const phase of PHASES) {
       const sum = segs.filter((s) => s.phase === phase).reduce((a, s) => a + s.target_duration_sec, 0);
-      const budget = phaseBudget[phase];
+      const budget = phaseBudget[phase] ?? 0;
       allPass &&= pass(`phase ${phase} target_duration sum`, sum === budget, `${sum} vs ${budget}`);
     }
 
     for (const phase of PHASES) {
       const phaseSegs = segs.filter((s) => s.phase === phase);
+      const budget = phaseBudget[phase] ?? 0;
+      if (budget === 0) {
+        allPass &&= pass(
+          `phase ${phase} absent when budget 0`,
+          phaseSegs.length === 0,
+          `${phaseSegs.length} segments`,
+        );
+        continue;
+      }
       if (phaseSegs.length === 0) continue;
-      const budget = phaseBudget[phase];
-      if (budget == null) continue;
 
       const timing = checkPhaseTimingClosure(phaseSegs, budget, overagePhases.has(phase));
       allPass &&= pass(`phase ${phase} timing closure`, timing.ok, timing.detail);

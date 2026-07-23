@@ -3,7 +3,7 @@
  * Credits in plans.ts remain for legacy references; generation path uses minutes.
  */
 
-export const SESSION_LENGTH_MINUTES = 40;
+export const SESSION_LENGTH_MINUTES = 45;
 
 /** stock = 1× length; own_voice = 2× length. */
 export const VOICE_MULTIPLIER = {

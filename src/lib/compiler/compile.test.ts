@@ -1,6 +1,10 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { CompilerError, compileManifest, formatCompilerFailureMessage } from "./compile";
+import { buildSessionSkeleton } from "./skeleton";
+import { CompilerError, compileManifest, formatCompilerFailureMessage, PROMPT_VERSION } from "./compile";
+import { COMPILER_PROMPT_V2 } from "./prompt.v2";
 import type { CompilerInput } from "../session/derive";
+
+const skeleton = buildSessionSkeleton({ length_min: 15 });
 
 const FIXTURE_INPUT: CompilerInput = {
   goal_version_id: "550e8400-e29b-41d4-a716-446655440000",
@@ -22,8 +26,13 @@ const FIXTURE_INPUT: CompilerInput = {
   sync_actions: [{ action: "send the email" }],
   senses_emphasis: ["sight", "touch"],
   session: {
-    duration_min: 20,
-    phase_budget_sec: { beta: 60, alpha: 240, theta: 780, gamma: 120 },
+    duration_min: 15,
+    phase_budget_sec: {
+      beta: skeleton.phase_budget.beta_sec,
+      alpha: skeleton.phase_budget.alpha_sec,
+      theta: skeleton.phase_budget.theta_sec,
+      gamma: skeleton.phase_budget.gamma_sec,
+    },
     entrainment_plan: [
       { phase: "beta", hz: 18, glide_to: 10, glide_sec: 45 },
       { phase: "alpha", hz: 10, glide_to: 6, glide_sec: 60 },
@@ -32,7 +41,11 @@ const FIXTURE_INPUT: CompilerInput = {
     ],
     person_config: { induction: "second", theta_declarations: "first" },
     pacing: { beta_wpm: 130, alpha_wpm: 90, theta_wpm: 105, gamma_wpm: 150 },
+    posture: "sitting",
+    middle_start: 2,
+    middle_count: 2,
   },
+  skeleton,
 };
 
 describe("compileManifest", () => {
@@ -45,6 +58,33 @@ describe("compileManifest", () => {
 
   afterEach(() => {
     vi.unstubAllEnvs();
+  });
+
+  it("defaults to prompt v2.0", () => {
+    expect(PROMPT_VERSION).toBe("v2.0");
+  });
+
+  it("sends the v2 system prompt and skeleton in the user message", async () => {
+    const create = vi.fn().mockResolvedValue({
+      stop_reason: "end_turn",
+      usage: { input_tokens: 1, output_tokens: 1 },
+      content: [{ type: "text", text: "{not json" }],
+    });
+    await expect(
+      compileManifest(FIXTURE_INPUT, { client: { messages: { create } } as never }),
+    ).rejects.toBeInstanceOf(CompilerError);
+
+    expect(create).toHaveBeenCalled();
+    const firstCall = create.mock.calls[0]![0] as {
+      system: string;
+      messages: [{ content: string }];
+    };
+    expect(firstCall.system).toBe(COMPILER_PROMPT_V2);
+    const user = JSON.parse(firstCall.messages[0]!.content) as {
+      skeleton: { length_min: number; steps: unknown[] };
+    };
+    expect(user.skeleton.length_min).toBe(15);
+    expect(user.skeleton.steps).toHaveLength(4);
   });
 
   it("populates rawResponse on final CompilerError", async () => {

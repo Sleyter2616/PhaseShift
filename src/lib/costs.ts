@@ -1,4 +1,9 @@
 import type { TtsProviderId } from "./tts/provider";
+import {
+  LENGTHS,
+  buildSessionSkeleton,
+  type SessionLengthMin,
+} from "./compiler/skeleton";
 
 /** §2.3 — Effective pacing (words per minute, silence included) */
 export const PACING_WPM = {
@@ -8,17 +13,27 @@ export const PACING_WPM = {
   gamma: 150,
 } as const;
 
-/** §2.3 — Phase budgets by preset (seconds) */
-export const PHASE_BUDGET_SEC = {
-  20: { beta: 60, alpha: 240, theta: 780, gamma: 120 },
-  30: { beta: 90, alpha: 360, theta: 1140, gamma: 210 },
-  40: { beta: 120, alpha: 480, theta: 1500, gamma: 300 },
-  60: { beta: 180, alpha: 720, theta: 2340, gamma: 360 },
-} as const;
+export type DurationPreset = SessionLengthMin;
 
-export type DurationPreset = keyof typeof PHASE_BUDGET_SEC;
+export { LENGTHS };
 
-/** §2.3 — ~27,000 billable characters per 40-min full generation */
+/** Phase budgets (seconds) derived from the server-owned skeleton (full step set). */
+export const PHASE_BUDGET_SEC = Object.fromEntries(
+  LENGTHS.map((length) => {
+    const { phase_budget } = buildSessionSkeleton({ length_min: length });
+    return [
+      length,
+      {
+        beta: phase_budget.beta_sec,
+        alpha: phase_budget.alpha_sec,
+        theta: phase_budget.theta_sec,
+        gamma: phase_budget.gamma_sec,
+      },
+    ];
+  }),
+) as Record<SessionLengthMin, { beta: number; alpha: number; theta: number; gamma: number }>;
+
+/** §2.3 — ~27,000 billable characters per 40-min full generation (legacy reference) */
 export const BILLABLE_CHARS_40MIN = 27_000;
 
 /** §5 — 1 credit = one Flash generation (blueprint §5 top-up) */

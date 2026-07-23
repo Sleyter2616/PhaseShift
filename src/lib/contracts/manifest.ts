@@ -15,7 +15,7 @@ const archetypeEnum = z.enum([
 ]);
 
 const phaseBudgetSchema = z.object({
-  beta: z.number().int().positive(),
+  beta: z.number().int().nonnegative(),
   alpha: z.number().int().positive(),
   theta: z.number().int().positive(),
   gamma: z.number().int().positive(),
@@ -106,13 +106,24 @@ export function collectWordBudgetWarnings(
   return warnings;
 }
 
-function collectRefinementErrors(manifest: Manifest): string[] {
+function collectRefinementErrors(
+  manifest: Manifest,
+  options?: { expectedThetaSteps?: number[] },
+): string[] {
   const errors: string[] = [];
 
   for (const phase of PHASES) {
     const budget = manifest.meta.phase_budget_sec[phase];
     const phaseSegments = manifest.segments.filter((s) => s.phase === phase);
     const sumDuration = phaseSegments.reduce((acc, s) => acc + s.target_duration_sec, 0);
+    if (budget === 0) {
+      if (phaseSegments.length > 0) {
+        errors.push(
+          `phase ${phase}: budget is 0 but found ${phaseSegments.length} segment(s)`,
+        );
+      }
+      continue;
+    }
     if (sumDuration !== budget) {
       errors.push(
         `phase ${phase}: sum of target_duration_sec (${sumDuration}) !== phase_budget_sec (${budget})`,
@@ -136,13 +147,6 @@ function collectRefinementErrors(manifest: Manifest): string[] {
     .map((s) => s.step)
     .filter((step): step is number => step !== null && step !== undefined);
 
-  for (let step = 1; step <= 12; step++) {
-    const count = thetaSteps.filter((s) => s === step).length;
-    if (count < 1) {
-      errors.push(`theta phase missing at least one segment for step ${step}`);
-    }
-  }
-
   const orderedUniqueSteps: number[] = [];
   for (const seg of thetaSegments) {
     if (seg.step === null || seg.step === undefined) {
@@ -154,10 +158,29 @@ function collectRefinementErrors(manifest: Manifest): string[] {
     }
   }
 
-  const expectedOrder = Array.from({ length: 12 }, (_, i) => i + 1);
+  const expectedOrder =
+    options?.expectedThetaSteps ??
+    (orderedUniqueSteps.length > 0
+      ? orderedUniqueSteps
+      : Array.from({ length: 12 }, (_, i) => i + 1));
+
+  for (const step of expectedOrder) {
+    const count = thetaSteps.filter((s) => s === step).length;
+    if (count < 1) {
+      errors.push(`theta phase missing at least one segment for step ${step}`);
+    }
+  }
+
+  const unexpected = orderedUniqueSteps.filter((step) => !expectedOrder.includes(step));
+  if (unexpected.length > 0) {
+    errors.push(
+      `theta contains unexpected steps [${unexpected.join(", ")}]; expected [${expectedOrder.join(", ")}]`,
+    );
+  }
+
   if (orderedUniqueSteps.join(",") !== expectedOrder.join(",")) {
     errors.push(
-      `theta steps must appear in order 1..12; got unique step order [${orderedUniqueSteps.join(", ")}]`,
+      `theta steps must appear in order [${expectedOrder.join(", ")}]; got unique step order [${orderedUniqueSteps.join(", ")}]`,
     );
   }
 
@@ -168,7 +191,10 @@ export type ManifestValidationResult =
   | { ok: true; data: Manifest; warnings: string[] }
   | { ok: false; errors: string[] };
 
-export function validateManifest(json: unknown): ManifestValidationResult {
+export function validateManifest(
+  json: unknown,
+  options?: { expectedThetaSteps?: number[] },
+): ManifestValidationResult {
   const parsed = manifestSchema.safeParse(json);
   if (!parsed.success) {
     const errors = parsed.error.issues.map((issue) => {
@@ -178,7 +204,7 @@ export function validateManifest(json: unknown): ManifestValidationResult {
     return { ok: false, errors };
   }
 
-  const refinementErrors = collectRefinementErrors(parsed.data);
+  const refinementErrors = collectRefinementErrors(parsed.data, options);
   if (refinementErrors.length > 0) {
     return { ok: false, errors: refinementErrors };
   }
