@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { ServiceClient } from "@/lib/db/service-client";
 import { getProvider } from "@/lib/tts/registry";
+import { linkScriptSegmentsByContentHash } from "./dedupe-plan";
 import {
   buildStoragePath,
   loadScriptSynthesisIdentity,
@@ -35,6 +36,72 @@ export interface SynthesizeSegmentInput {
   next_text?: string;
 }
 
+export function isUniqueViolation(error: { code?: string; message?: string }): boolean {
+  if (error.code === "23505") return true;
+  const message = (error.message ?? "").toLowerCase();
+  return (
+    message.includes("duplicate key") ||
+    message.includes("unique constraint") ||
+    message.includes("audio_files_shared_dedupe_idx") ||
+    message.includes("audio_files_user_dedupe_idx")
+  );
+}
+
+/**
+ * Insert audio_files row; on unique(dedupe_key) conflict, fetch and return the
+ * existing row instead of throwing (parallel synthesis of the same cue).
+ */
+export async function insertAudioFileOrFetchExisting(
+  supabase: ServiceClient,
+  row: {
+    id: string;
+    user_id: string | null;
+    asset_scope: "user" | "shared";
+    provider: string;
+    dedupe_key: string;
+    storage_path: string;
+    duration_sec: number;
+    bytes: number;
+    format: string;
+    provider_request_id: string | null;
+  },
+): Promise<{ audioFileId: string; durationSec: number; reused: boolean }> {
+  const { error: audioInsertError } = await supabase.from("audio_files").insert(row);
+
+  if (!audioInsertError) {
+    return { audioFileId: row.id, durationSec: row.duration_sec, reused: false };
+  }
+
+  if (!isUniqueViolation(audioInsertError)) {
+    throw new Error(`audio_files insert failed: ${audioInsertError.message}`);
+  }
+
+  let query = supabase
+    .from("audio_files")
+    .select("id, duration_sec")
+    .eq("dedupe_key", row.dedupe_key)
+    .eq("asset_scope", row.asset_scope);
+
+  if (row.asset_scope === "user") {
+    query = query.eq("user_id", row.user_id);
+  } else {
+    query = query.is("user_id", null);
+  }
+
+  const { data: existing, error: fetchError } = await query.maybeSingle();
+  if (fetchError || !existing?.id || existing.duration_sec == null) {
+    throw new Error(
+      `audio_files dedupe conflict but existing row missing: ${fetchError?.message ?? row.dedupe_key}`,
+    );
+  }
+
+  return {
+    audioFileId: existing.id,
+    durationSec: Number(existing.duration_sec),
+    reused: true,
+  };
+}
+
 export async function runSynthesizeSegment(
   supabase: ServiceClient,
   input: SynthesizeSegmentInput,
@@ -53,6 +120,31 @@ export async function runSynthesizeSegment(
   }
 
   const identity = await loadScriptSynthesisIdentity(supabase, script);
+
+  // Fast path: another job already inserted this cue — link and return.
+  {
+    let existingQuery = supabase
+      .from("audio_files")
+      .select("id, duration_sec")
+      .eq("dedupe_key", dedupe_key)
+      .eq("asset_scope", identity.assetScope);
+    if (identity.assetScope === "user") {
+      existingQuery = existingQuery.eq("user_id", script.user_id);
+    } else {
+      existingQuery = existingQuery.is("user_id", null);
+    }
+    const { data: existing } = await existingQuery.maybeSingle();
+    if (existing?.id && existing.duration_sec != null) {
+      await linkScriptSegmentsByContentHash(supabase, {
+        scriptId: script_id,
+        contentHash: dedupe_key,
+        audioFileId: existing.id,
+        durationSec: Number(existing.duration_sec),
+      });
+      return { audio_file_id: existing.id, duration_sec: Number(existing.duration_sec) };
+    }
+  }
+
   const audioFileId = randomUUID();
   const storagePath = buildStoragePath(identity, audioFileId);
 
@@ -80,7 +172,7 @@ export async function runSynthesizeSegment(
     }),
   );
 
-  const { error: audioInsertError } = await supabase.from("audio_files").insert({
+  const inserted = await insertAudioFileOrFetchExisting(supabase, {
     id: audioFileId,
     user_id: identity.assetScope === "user" ? script.user_id : null,
     asset_scope: identity.assetScope,
@@ -93,23 +185,13 @@ export async function runSynthesizeSegment(
     provider_request_id: result.requestId ?? null,
   });
 
-  if (audioInsertError) {
-    throw new Error(`audio_files insert failed: ${audioInsertError.message}`);
-  }
+  // Link primary + any siblings on this script that share the cue hash.
+  await linkScriptSegmentsByContentHash(supabase, {
+    scriptId: script_id,
+    contentHash: dedupe_key,
+    audioFileId: inserted.audioFileId,
+    durationSec: inserted.durationSec,
+  });
 
-  const { error: segmentError } = await supabase
-    .from("script_segments")
-    .update({
-      audio_file_id: audioFileId,
-      actual_duration_sec: result.durationSec,
-      synthesis_status: "ready",
-    })
-    .eq("id", segment_id)
-    .eq("script_id", script_id);
-
-  if (segmentError) {
-    throw new Error(`segment update failed: ${segmentError.message}`);
-  }
-
-  return { audio_file_id: audioFileId, duration_sec: result.durationSec };
+  return { audio_file_id: inserted.audioFileId, duration_sec: inserted.durationSec };
 }

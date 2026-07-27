@@ -6,7 +6,7 @@ import {
   compileManifest,
   formatCompilerFailureMessage,
 } from "@/lib/compiler/compile";
-import { applyDedupeHits, planSegmentDedupe } from "@/lib/pipeline/dedupe-plan";
+import { applyDedupeHits, linkPendingSegmentsFromAudioCache, planSegmentDedupe } from "@/lib/pipeline/dedupe-plan";
 import { deriveSegmentRows } from "@/lib/pipeline/segment-rows";
 import { reconcileSegments } from "@/lib/pipeline/reconcile-persist";
 import { markScriptFailed } from "@/lib/pipeline/mark-script-failed";
@@ -140,6 +140,15 @@ export const generateScript = inngest.createFunction(
           }),
         );
       }
+
+      await step.run("link-shared-cues", async () => {
+        const supabase = getServiceClient();
+        await linkPendingSegmentsFromAudioCache(
+          supabase,
+          { userId: scriptCtx.user_id, assetScope: synthesisIdentity.assetScope },
+          scriptId,
+        );
+      });
 
       const reconcileResult = await step.run("reconcile", async () => {
         const supabase = getServiceClient();
