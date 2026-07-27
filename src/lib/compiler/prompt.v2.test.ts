@@ -40,7 +40,8 @@ describe("prompt.v2.0", () => {
     expect(COMPILER_PROMPT_V2).toContain("Banned: will, would, could, might, hope, wish");
     expect(COMPILER_PROMPT_V2).toContain("Banned tokens must not appear anywhere in theta text");
     expect(COMPILER_PROMPT_V2).toContain("appears verbatim at least once");
-    expect(COMPILER_PROMPT_V2).toContain("at least 20% of their duration as");
+    expect(COMPILER_PROMPT_V2).toContain("## THETA FILL (mandatory");
+    expect(COMPILER_PROMPT_V2).toContain("min_words");
     expect(COMPILER_PROMPT_V2).toContain("## CONTENT RULES (mandatory)");
     expect(COMPILER_PROMPT_V2).toContain('write "one million dollars", not "$1M"');
     expect(COMPILER_PROMPT_V2).toContain("progressive muscle tension-release");
@@ -61,7 +62,16 @@ describe("prompt.v2.0", () => {
       beta_sec: skeleton.phase_budget.beta_sec,
       theta_sec: skeleton.phase_budget.theta_sec,
     });
-    expect(formatted.theta_steps).toEqual(skeleton.theta_steps);
+    const thetaSteps = formatted.theta_steps as Array<{
+      step: number;
+      target_sec: number;
+      target_words: number;
+      min_words: number;
+    }>;
+    expect(thetaSteps).toHaveLength(skeleton.theta_steps.length);
+    expect(thetaSteps[0]?.target_sec).toBe(skeleton.theta_steps[0]?.target_sec);
+    expect(thetaSteps[0]?.min_words).toBeGreaterThan(0);
+    expect(thetaSteps[0]?.target_words).toBeGreaterThanOrEqual(thetaSteps[0]!.min_words);
     const sequences = formatted.counted_sequences as Record<string, string>;
     expect(sequences.alpha_breath).toContain("breath");
     expect(sequences.alpha_countdown).toContain("countdown");

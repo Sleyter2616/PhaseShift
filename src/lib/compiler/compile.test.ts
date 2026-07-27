@@ -7,8 +7,19 @@ import {
   PROMPT_VERSION,
 } from "./compile";
 import { COMPILER_PROMPT_V2 } from "./prompt.v2";
+import { THETA_REFLECTIVE_PAUSE_MS, thetaMinWords } from "./theta-fill";
 import type { CompilerInput } from "../session/derive";
 import { DEFAULT_ENTRAINMENT_PLAN } from "../session/derive";
+
+function padWords(minWords: number): string {
+  const unit = "I hold the scene with steady focus and clear sensory detail";
+  const words = unit.split(/\s+/);
+  const out: string[] = [];
+  while (out.length < minWords) {
+    out.push(...words);
+  }
+  return out.slice(0, minWords).join(" ");
+}
 
 function buildCompilerInput(lengthMin: 15 | 45): CompilerInput {
   const middle_count = lengthMin === 15 ? 2 : 10;
@@ -63,7 +74,10 @@ function buildCompilerInput(lengthMin: 15 | 45): CompilerInput {
  * Model-shaped draft: intentionally omits server-owned fields
  * (total_duration_sec, entrainment_plan, seq, pacing_wpm).
  */
-function modelOwnedManifestDraft(input: CompilerInput): Record<string, unknown> {
+function modelOwnedManifestDraft(
+  input: CompilerInput,
+  options?: { sparseTheta?: boolean },
+): Record<string, unknown> {
   const budget = input.session.phase_budget_sec;
   const steps = input.skeleton.steps;
   const thetaTargets = input.skeleton.theta_steps;
@@ -106,7 +120,9 @@ function modelOwnedManifestDraft(input: CompilerInput): Record<string, unknown> 
       archetype: null,
       target_duration_sec: timing.target_sec,
       pause_after_ms: 500,
-      text: "I hold the scene with steady focus and clear detail.",
+      text: options?.sparseTheta
+        ? "I hold a thin scene."
+        : padWords(thetaMinWords(timing.target_sec, input.session.pacing.theta_wpm)),
     });
   }
 
@@ -167,10 +183,16 @@ describe("compileManifest", () => {
     };
     expect(firstCall.system).toBe(COMPILER_PROMPT_V2);
     const user = JSON.parse(firstCall.messages[0]!.content) as {
-      skeleton: { length_min: number; steps: unknown[] };
+      skeleton: {
+        length_min: number;
+        steps: unknown[];
+        theta_steps: Array<{ target_words: number; min_words: number }>;
+      };
     };
     expect(user.skeleton.length_min).toBe(15);
     expect(user.skeleton.steps).toHaveLength(4);
+    expect(user.skeleton.theta_steps[0]?.min_words).toBeGreaterThan(0);
+    expect(user.skeleton.theta_steps[0]?.target_words).toBeGreaterThan(0);
   });
 
   it.each([15, 45] as const)(
@@ -202,21 +224,58 @@ describe("compileManifest", () => {
       );
       expect(manifest.segments.every((s) => s.pacing_wpm > 0)).toBe(true);
 
+      const thetaSegments = manifest.segments.filter((s) => s.phase === "theta");
+      const thetaSum = thetaSegments.reduce((acc, s) => acc + s.target_duration_sec, 0);
+      expect(thetaSum).toBe(input.skeleton.phase_budget.theta_sec);
+
       const thetaSteps = [
         ...new Set(
-          manifest.segments
-            .filter((s) => s.phase === "theta")
-            .map((s) => s.step)
-            .filter((s): s is number => s != null),
+          thetaSegments.map((s) => s.step).filter((s): s is number => s != null),
         ),
       ];
       expect(thetaSteps).toEqual(input.skeleton.steps);
+
+      const betweenStepPauses = thetaSegments.filter((segment, index) => {
+        const next = thetaSegments[index + 1];
+        return next != null && next.step !== segment.step;
+      });
+      expect(
+        betweenStepPauses.every((segment) => segment.pause_after_ms === THETA_REFLECTIVE_PAUSE_MS),
+      ).toBe(true);
 
       if (input.session.phase_budget_sec.beta === 0) {
         expect(manifest.segments.every((s) => s.phase !== "beta")).toBe(true);
       }
     },
   );
+
+  it("retries with expansion instructions when theta text is underfilled", async () => {
+    const input = buildCompilerInput(15);
+    const sparse = modelOwnedManifestDraft(input, { sparseTheta: true });
+    const filled = modelOwnedManifestDraft(input);
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce({
+        stop_reason: "end_turn",
+        usage: { input_tokens: 10, output_tokens: 100 },
+        content: [{ type: "text", text: JSON.stringify(sparse) }],
+      })
+      .mockResolvedValueOnce({
+        stop_reason: "end_turn",
+        usage: { input_tokens: 10, output_tokens: 100 },
+        content: [{ type: "text", text: JSON.stringify(filled) }],
+      });
+
+    const manifest = await compileManifest(input, {
+      client: { messages: { create } } as never,
+    });
+
+    expect(create).toHaveBeenCalledTimes(2);
+    const retryUser = create.mock.calls[1]![0].messages[0].content as string;
+    expect(retryUser).toContain("THETA UNDERFILL");
+    expect(retryUser).toContain("UNDERFILLED");
+    expect(manifest.segments.some((s) => s.phase === "theta")).toBe(true);
+  });
 
   it("populates rawResponse on final CompilerError", async () => {
     const raw = "```json\n{ definitely not valid }\n```";

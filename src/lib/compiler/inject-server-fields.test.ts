@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildSessionSkeleton } from "./skeleton";
 import { injectServerOwnedFields } from "./inject-server-fields";
+import { THETA_REFLECTIVE_PAUSE_MS } from "./theta-fill";
 import type { CompilerInput } from "../session/derive";
 import { DEFAULT_ENTRAINMENT_PLAN } from "../session/derive";
 
@@ -109,5 +110,44 @@ describe("injectServerOwnedFields", () => {
       pacing_wpm: 105,
     });
     expect(actions.some((a) => a.includes("total_duration_sec"))).toBe(true);
+  });
+
+  it("stamps reflective pauses between theta steps", () => {
+    const input = compilerInputForLength(15);
+    const draft = {
+      meta: { goal_version_id: input.goal_version_id },
+      segments: [
+        {
+          phase: "theta",
+          step: 1,
+          target_duration_sec: 60,
+          pause_after_ms: 200,
+          text: "Step one.",
+        },
+        {
+          phase: "theta",
+          step: 2,
+          target_duration_sec: 60,
+          pause_after_ms: 9000,
+          text: "Step two.",
+        },
+        {
+          phase: "theta",
+          step: 12,
+          target_duration_sec: 60,
+          pause_after_ms: 0,
+          text: "Closure.",
+        },
+      ],
+    };
+
+    const { manifest, actions } = injectServerOwnedFields(draft, input);
+    const stamped = manifest as {
+      segments: Array<{ step: number | null; pause_after_ms: number }>;
+    };
+    expect(stamped.segments[0]?.pause_after_ms).toBe(THETA_REFLECTIVE_PAUSE_MS);
+    expect(stamped.segments[1]?.pause_after_ms).toBe(THETA_REFLECTIVE_PAUSE_MS);
+    expect(stamped.segments[2]?.pause_after_ms).toBe(0);
+    expect(actions.some((a) => a.includes("reflective pause_after_ms"))).toBe(true);
   });
 });

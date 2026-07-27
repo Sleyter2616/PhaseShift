@@ -12,6 +12,10 @@ import {
   PROMPT_VERSION as PROMPT_VERSION_V2,
 } from "../compiler/prompt.v2";
 import { stripCodeFences } from "../compiler/strip-fences";
+import {
+  collectThetaFillErrors,
+  formatThetaExpansionRetryMessage,
+} from "./theta-fill";
 import { validateManifest, type Manifest } from "../contracts/manifest";
 import { compilerInputForModel, type CompilerInput } from "../session/derive";
 
@@ -77,6 +81,16 @@ function promptForVersion(version: CompilerPromptVersion): {
   return { system: COMPILER_PROMPT_V2, promptVersion: PROMPT_VERSION_V2 };
 }
 
+function buildRetryUserMessage(compilerInput: CompilerInput, errors: string[]): string {
+  const underfill = errors.some((error) =>
+    /UNDERFILLED|theta target sum|target_duration sum/i.test(error),
+  );
+  const header = underfill
+    ? formatThetaExpansionRetryMessage(errors)
+    : `VALIDATOR ERRORS (fix and re-emit):\n${errors.join("\n")}`;
+  return `${JSON.stringify(compilerInputForModel(compilerInput))}\n\n${header}${RETRY_SUFFIX}`;
+}
+
 export async function compileManifest(
   compilerInput: CompilerInput,
   options?: {
@@ -95,6 +109,7 @@ export async function compileManifest(
   const version = resolveCompilerPromptVersion(options?.promptVersion);
   const { system } = promptForVersion(version);
   const expectedThetaSteps = compilerInput.skeleton.steps;
+  const runThetaFill = version === "v2.0";
 
   let userMessage = JSON.stringify(compilerInputForModel(compilerInput));
   let lastErrors: string[] = [];
@@ -134,7 +149,7 @@ export async function compileManifest(
       attempts.push(attemptInfo);
       options?.onAttempt?.(attemptInfo);
       if (attempt === 1) break;
-      userMessage = `${JSON.stringify(compilerInputForModel(compilerInput))}\n\nVALIDATOR ERRORS (fix and re-emit):\n${lastErrors.join("\n")}${RETRY_SUFFIX}`;
+      userMessage = buildRetryUserMessage(compilerInput, lastErrors);
       continue;
     }
 
@@ -165,17 +180,32 @@ export async function compileManifest(
           `meta.goal_version_id mismatch: expected ${compilerInput.goal_version_id}, got ${result.data.meta.goal_version_id}`,
         ];
       } else {
-        const attemptInfo = {
-          attempt: attempt + 1,
-          validationErrors: [],
-          validationWarnings: result.warnings,
-          normalizeActions,
-        };
-        attempts.push(attemptInfo);
-        options?.onAttempt?.(attemptInfo);
-        const speakable = applySpeakableOutputNormalization(result.data);
-        logSpeakableOutputChanges(speakable.changes);
-        return speakable.manifest;
+        const fillErrors = runThetaFill
+          ? collectThetaFillErrors(
+              result.data,
+              compilerInput.skeleton,
+              compilerInput.session.pacing.theta_wpm,
+            )
+          : [];
+
+        if (fillErrors.length > 0) {
+          lastErrors = fillErrors;
+          for (const error of fillErrors) {
+            console.error(`theta-fill: ${error}`);
+          }
+        } else {
+          const attemptInfo = {
+            attempt: attempt + 1,
+            validationErrors: [],
+            validationWarnings: result.warnings,
+            normalizeActions,
+          };
+          attempts.push(attemptInfo);
+          options?.onAttempt?.(attemptInfo);
+          const speakable = applySpeakableOutputNormalization(result.data);
+          logSpeakableOutputChanges(speakable.changes);
+          return speakable.manifest;
+        }
       }
     } else {
       lastErrors = result.errors;
@@ -191,7 +221,7 @@ export async function compileManifest(
     options?.onAttempt?.(attemptInfo);
 
     if (attempt === 0) {
-      userMessage = `${JSON.stringify(compilerInputForModel(compilerInput))}\n\nVALIDATOR ERRORS (fix and re-emit):\n${lastErrors.join("\n")}${RETRY_SUFFIX}`;
+      userMessage = buildRetryUserMessage(compilerInput, lastErrors);
     }
   }
 

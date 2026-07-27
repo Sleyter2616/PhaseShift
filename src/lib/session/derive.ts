@@ -139,7 +139,7 @@ export function compilerInputForModel(
   void raw;
   return {
     ...modelInput,
-    skeleton: formatSkeletonForPrompt(skeleton),
+    skeleton: formatSkeletonForPrompt(skeleton, input.session.pacing.theta_wpm),
   };
 }
 

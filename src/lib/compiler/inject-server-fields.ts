@@ -1,5 +1,6 @@
 import type { CompilerInput } from "../session/derive";
 import type { ManifestSegment } from "../contracts/manifest";
+import { stampThetaReflectivePauses } from "./theta-fill";
 
 const PHASES = ["beta", "alpha", "theta", "gamma", "delta"] as const;
 type Phase = (typeof PHASES)[number];
@@ -10,6 +11,19 @@ function isPhase(value: unknown): value is Phase {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+type PauseStampable = Pick<ManifestSegment, "seq" | "phase" | "step" | "pause_after_ms"> &
+  Record<string, unknown>;
+
+function isPauseStampable(value: unknown): value is PauseStampable {
+  return (
+    isRecord(value) &&
+    typeof value.seq === "number" &&
+    typeof value.phase === "string" &&
+    (value.step === null || typeof value.step === "number") &&
+    typeof value.pause_after_ms === "number"
+  );
 }
 
 /**
@@ -54,7 +68,7 @@ export function injectServerOwnedFields(
     delta: pacing.theta_wpm,
   };
 
-  const stampedSegments = segmentsIn.map((segment, index) => {
+  let stampedSegments: unknown[] = segmentsIn.map((segment, index) => {
     if (!isRecord(segment)) return segment;
 
     const next: Record<string, unknown> = { ...segment };
@@ -70,6 +84,12 @@ export function injectServerOwnedFields(
 
     return next;
   });
+
+  if (stampedSegments.every(isPauseStampable)) {
+    const paused = stampThetaReflectivePauses(stampedSegments);
+    stampedSegments = paused.segments;
+    actions.push(...paused.actions);
+  }
 
   draft.segments = stampedSegments;
   actions.push(`stamped seq + pacing_wpm on ${stampedSegments.length} segment(s)`);

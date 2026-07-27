@@ -1,5 +1,10 @@
 import type { SessionSkeleton } from "./skeleton";
 import { STEP_NAMES } from "./skeleton";
+import {
+  formatThetaStepsForPrompt,
+  THETA_REFLECTIVE_PAUSE_MS,
+  THETA_WORD_FILL_MIN_RATIO,
+} from "./theta-fill";
 
 export const PROMPT_VERSION = "v2.0";
 
@@ -22,7 +27,7 @@ except one valid JSON object matching the provided schema.
   skeleton: {
     length_min, steps, posture,
     phase_budget: { beta_sec, alpha_sec, theta_sec, gamma_sec },
-    theta_steps: [{ step, target_sec }],
+    theta_steps: [{ step, name, target_sec, target_words, min_words }],
     counted_sequences: { alpha_breath, alpha_countdown, gamma_energizing, gamma_countup }
   } }
 
@@ -42,14 +47,30 @@ except one valid JSON object matching the provided schema.
    Write only non-counted content for alpha/gamma; the server splices the
    timed cue micro-segments in.
 
+## THETA FILL (mandatory — sessions must not run short)
+Theta is a deep-work phase (often 20–33 minutes). It must be RICH with
+substantive content, not sparse. For EVERY entry in skeleton.theta_steps:
+- Emit segment(s) whose target_duration_sec sum equals target_sec exactly.
+- Write enough spoken text to meet min_words (≈${Math.round(THETA_WORD_FILL_MIN_RATIO * 100)}% of
+  target_words = pacing.theta_wpm × target_sec / 60). Aim for 85-95% of target_words.
+- Expand with sensory detail, spatial precision, verbatim intake placement,
+  first-person declarations, and embodied rehearsal — never filler, never
+  silence-as-padding.
+- Between theta steps, use a modest reflective pause_after_ms of about
+  ${THETA_REFLECTIVE_PAUSE_MS}ms on the last segment of each step (except the final
+  Closure step). Pauses are contemplative space; they do NOT fill the time budget —
+  speech does.
+
 ## STRUCTURAL RULES
-1. Word budget per segment = pacing_wpm * target_duration_sec / 60. Treat this as
-   a ceiling. Aim for 85-95% of the word budget so post-synthesis silence can stretch.
+1. Word budget per segment = pacing_wpm * target_duration_sec / 60. For theta this
+   is a FLOOR (min_words) as well as a soft ceiling (≈115%). Underfilling theta
+   fails validation and triggers a rewrite. For other phases, treat the budget as
+   a ceiling and aim for 85-95%.
 2. Pauses: optional inline <break time="X.Xs"/> must use NUMERIC seconds only
    (e.g. "1.5s", never "one.5s" or worded numbers) with a hard maximum of 3.0s.
-   Silence longer than 3s belongs in pause_after_ms, never in text. Alpha and
-   theta segments must carry at least 20% of their duration as pause_after_ms
-   (prefer pause_after_ms over inline breaks). Never pad duration with filler words.
+   Silence longer than 3s belongs in pause_after_ms, never in text. Prefer
+   pause_after_ms over inline breaks for contemplative space. Never pad duration
+   with filler words.
 3. Every intake string (goal_statement, both localization fields, all three
    triangulation items, every not_list item, every feature, every sync_action)
    appears verbatim at least once, in its designated step (when that step is present
@@ -159,9 +180,10 @@ specify a perspective). Theta step values must match skeleton.steps in order.
    leave room; do not fill alpha/gamma entirely with text that crowds them out.
 3. Theta unique step order exactly matches skeleton.steps.
 4. Each theta step's duration sum equals skeleton.theta_steps target_sec.
-5. No counted-sequence narration, no timing ratios spoken aloud, no worded
+5. Each theta step's spoken word count is ≥ min_words (and usually 85-95% of
+   target_words). Underfilled steps fail.
+6. No counted-sequence narration, no timing ratios spoken aloud, no worded
    numbers inside <break> tags. Any inline <break> uses numeric seconds ≤ 3.0s.
-6. Per-segment word counts do not exceed the calculated budget (usually 85-95%).
 7. All intake strings for PRESENT steps appear verbatim. No banned tokens.
 If any check fails, fix and re-emit. Output only the final JSON.`;
 
@@ -179,7 +201,10 @@ export function formatCountedSequenceForPrompt(
 }
 
 /** Build the skeleton block embedded alongside intake for the model. */
-export function formatSkeletonForPrompt(skeleton: SessionSkeleton): Record<string, unknown> {
+export function formatSkeletonForPrompt(
+  skeleton: SessionSkeleton,
+  thetaWpm?: number,
+): Record<string, unknown> {
   return {
     length_min: skeleton.length_min,
     steps: skeleton.steps.map((step) => ({
@@ -193,7 +218,7 @@ export function formatSkeletonForPrompt(skeleton: SessionSkeleton): Record<strin
       theta_sec: skeleton.phase_budget.theta_sec,
       gamma_sec: skeleton.phase_budget.gamma_sec,
     },
-    theta_steps: skeleton.theta_steps,
+    theta_steps: formatThetaStepsForPrompt(skeleton.theta_steps, thetaWpm),
     counted_sequences: {
       alpha_breath: formatCountedSequenceForPrompt(skeleton.counted_sequences.alpha_breath),
       alpha_countdown: formatCountedSequenceForPrompt(
