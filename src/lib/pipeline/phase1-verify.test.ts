@@ -62,16 +62,28 @@ describe("countBannedTokensInTheta", () => {
 });
 
 describe("phase timing closure (D11)", () => {
-  it("passes when voiced plus pauses are within 2% of budget", () => {
+  it("passes when voiced plus pauses are within budget (under-budget ok)", () => {
     const result = checkPhaseTimingClosure(
       [
-        { actual_duration_sec: 50, scheduled_pause_after_ms: 29_500 },
+        { actual_duration_sec: 50, scheduled_pause_after_ms: 500 },
         { actual_duration_sec: 40, scheduled_pause_after_ms: 500 },
       ],
       120,
       false,
     );
     expect(result.ok).toBe(true);
+  });
+
+  it("fails when voiced plus pauses exceed budget by more than 2%", () => {
+    const result = checkPhaseTimingClosure(
+      [
+        { actual_duration_sec: 50, scheduled_pause_after_ms: 29_500 },
+        { actual_duration_sec: 40, scheduled_pause_after_ms: 500 },
+      ],
+      100,
+      false,
+    );
+    expect(result.ok).toBe(false);
   });
 
   it("requires zero scheduled pauses for overage phases and reports overage %", () => {

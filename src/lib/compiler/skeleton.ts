@@ -273,9 +273,26 @@ export function distributeThetaTime(theta_sec: number, steps: number[]): ThetaSt
   return steps.map((step, i) => ({ step, target_sec: targets[i]! }));
 }
 
+/** Fixed breath ratio: inhale 4s / hold 2s / exhale 8s / pause 2s (per cycle). */
+export const BREATH_INHALE_SEC = 4;
+export const BREATH_HOLD_SEC = 2;
+export const BREATH_EXHALE_SEC = 8;
+export const BREATH_PAUSE_SEC = 2;
+export const BREATH_CYCLE_SEC =
+  BREATH_INHALE_SEC + BREATH_HOLD_SEC + BREATH_EXHALE_SEC + BREATH_PAUSE_SEC;
+
+export const BREATH_CUES = {
+  inhale: "Breathe in.",
+  hold: "Hold.",
+  exhale: "Breathe out.",
+  pause: "Rest.",
+} as const;
+
 /**
  * Server-owned counted-sequence timing with enforced break intervals so
  * pacing cannot be compressed by the model.
+ *
+ * Breath uses a fixed 4/2/8/2 cycle; cycle count is fit into totalSec.
  */
 export function buildCountedSequence(
   kind: CountedSequenceKind,
@@ -292,28 +309,24 @@ export function buildCountedSequence(
   const beats: CountedBeat[] = [];
 
   if (kind === "breath") {
-    // inhale / hold / exhale / pause — pause is the enforced inter-count break
-    const cycleTarget = totalSec / count;
-    const inhale = Math.max(2, Math.floor(cycleTarget * 0.3));
-    const hold = Math.max(1, Math.floor(cycleTarget * 0.1));
-    const exhale = Math.max(3, Math.floor(cycleTarget * 0.4));
-    const pause = Math.max(1, Math.floor(cycleTarget - inhale - hold - exhale));
-    // Adjust last pause so sum matches totalSec exactly
-    let used = 0;
-    for (let n = 1; n <= count; n += 1) {
-      beats.push({ kind: "inhale", sec: inhale });
-      beats.push({ kind: "hold", sec: hold });
-      beats.push({ kind: "exhale", sec: exhale });
-      used += inhale + hold + exhale;
-      const remainingCounts = count - n;
-      const pauseSec =
-        n === count
-          ? Math.max(1, totalSec - used)
-          : Math.max(1, Math.min(pause, totalSec - used - remainingCounts * (inhale + hold + exhale + 1)));
-      beats.push({ kind: "pause", sec: pauseSec });
-      used += pauseSec;
+    const maxCycles = Math.max(1, Math.floor(totalSec / BREATH_CYCLE_SEC));
+    const cycles = Math.min(count, maxCycles);
+    for (let n = 1; n <= cycles; n += 1) {
+      beats.push({ kind: "inhale", sec: BREATH_INHALE_SEC });
+      beats.push({ kind: "hold", sec: BREATH_HOLD_SEC });
+      beats.push({ kind: "exhale", sec: BREATH_EXHALE_SEC });
+      beats.push({ kind: "pause", sec: BREATH_PAUSE_SEC });
     }
-  } else if (kind === "countdown" || kind === "countup") {
+    const total_sec = cycles * BREATH_CYCLE_SEC;
+    return {
+      kind,
+      count: cycles,
+      total_sec,
+      beats,
+    };
+  }
+
+  if (kind === "countdown" || kind === "countup") {
     // Reserve 1s pause between each pair of counts when totalSec allows.
     const pauseSlots = Math.max(0, count - 1);
     const pauseEach = totalSec >= count + pauseSlots ? 1 : 0;
@@ -341,7 +354,7 @@ export function buildCountedSequence(
         r === rounds
           ? Math.max(1, totalSec - used - breathBlock - hold)
           : Math.max(1, perRound - breathBlock - hold);
-      beats.push({ kind: "inhale", sec: breathBlock }); // fast-breath block duration
+      beats.push({ kind: "inhale", sec: breathBlock });
       beats.push({ kind: "hold", sec: hold });
       beats.push({ kind: "pause", sec: pause });
       used += breathBlock + hold + pause;
@@ -350,7 +363,6 @@ export function buildCountedSequence(
 
   const sum = beats.reduce((acc, b) => acc + b.sec, 0);
   if (sum !== totalSec) {
-    // Fix drift on the last beat
     const last = beats.at(-1);
     if (last) {
       last.sec += totalSec - sum;
@@ -412,10 +424,11 @@ export function buildSessionSkeleton(input: {
   const theta_steps = distributeThetaTime(phase_budget.theta_sec, steps);
 
   // Counted sequences sized from phase budgets (server-owned pacing).
-  const alphaBreathSec = Math.max(30, Math.floor(phase_budget.alpha_sec * 0.45));
+  const alphaBreathSec = Math.max(BREATH_CYCLE_SEC, Math.floor(phase_budget.alpha_sec * 0.45));
   const alphaCountdownSec = Math.max(20, Math.floor(phase_budget.alpha_sec * 0.25));
   const gammaEnergizingSec = Math.max(30, Math.floor(phase_budget.gamma_sec * 0.5));
   const gammaCountupSec = Math.max(15, Math.floor(phase_budget.gamma_sec * 0.25));
+  const alphaBreathCycles = Math.max(1, Math.floor(alphaBreathSec / BREATH_CYCLE_SEC));
 
   return {
     length_min,
@@ -424,7 +437,7 @@ export function buildSessionSkeleton(input: {
     phase_budget,
     theta_steps,
     counted_sequences: {
-      alpha_breath: buildCountedSequence("breath", 6, alphaBreathSec),
+      alpha_breath: buildCountedSequence("breath", alphaBreathCycles, alphaBreathSec),
       alpha_countdown: buildCountedSequence("countdown", 10, alphaCountdownSec),
       gamma_energizing: buildCountedSequence("energizing_breath", 3, gammaEnergizingSec),
       gamma_countup: buildCountedSequence("countup", 5, gammaCountupSec),
