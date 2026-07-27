@@ -1,6 +1,6 @@
 import type { ServiceClient } from "@/lib/db/service-client";
 import type { CompilerInput } from "@/lib/session/derive";
-import { applyDedupeHits, planSegmentDedupe } from "./dedupe-plan";
+import { applyDedupeHits, linkPendingSegmentsFromAudioCache, planSegmentDedupe } from "./dedupe-plan";
 import { reconcileSegments } from "./reconcile-persist";
 import { segmentContentHash } from "./segment-rows";
 import { runSynthesizeSegment } from "./synthesize-segment-job";
@@ -110,6 +110,12 @@ export async function retryFailedScriptSynthesis(
       });
     }
   }
+
+  await linkPendingSegmentsFromAudioCache(
+    supabase,
+    { userId: script.user_id, assetScope: synthesisIdentity.assetScope },
+    scriptId,
+  );
 
   const { data: synthSegments, error: synthError } = await supabase
     .from("script_segments")

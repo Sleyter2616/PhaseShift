@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { uploadAudioWithRetry } from "./synthesize-segment-job";
+import { isUniqueViolation, uploadAudioWithRetry } from "./synthesize-segment-job";
 
 describe("uploadAudioWithRetry", () => {
   it("retries twice with 500ms then 1500ms backoff before succeeding", async () => {
@@ -30,5 +30,16 @@ describe("uploadAudioWithRetry", () => {
 
     expect(uploadFn).toHaveBeenCalledTimes(3);
     expect(sleepFn).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("isUniqueViolation", () => {
+  it("detects postgres unique violations for audio_files dedupe indexes", () => {
+    expect(isUniqueViolation({ code: "23505" })).toBe(true);
+    expect(
+      isUniqueViolation({ message: "duplicate key value violates unique constraint" }),
+    ).toBe(true);
+    expect(isUniqueViolation({ message: "audio_files_shared_dedupe_idx" })).toBe(true);
+    expect(isUniqueViolation({ code: "42501", message: "permission denied" })).toBe(false);
   });
 });
