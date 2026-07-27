@@ -86,8 +86,6 @@ export function checkPhaseTimingClosure(
     0,
   );
   const totalSec = voicedSec + pauseSec;
-  const tolerance = budgetSec * 0.02;
-  const delta = Math.abs(totalSec - budgetSec);
 
   if (isOveragePhase) {
     const allPausesZero = segments.every((segment) => (segment.scheduled_pause_after_ms ?? 0) === 0);
@@ -106,14 +104,14 @@ export function checkPhaseTimingClosure(
   }
 
   return {
-    ok: delta <= tolerance,
-    detail: `voiced+pause=${totalSec.toFixed(1)}s budget=${budgetSec}s delta=${delta.toFixed(1)}s`,
+    ok: totalSec <= budgetSec * 1.02,
+    detail: `voiced+pause=${totalSec.toFixed(1)}s budget=${budgetSec}s delta=${(totalSec - budgetSec).toFixed(1)}s`,
   };
 }
 
 export function findLongScheduledPauses(
   segments: ReadonlyArray<{ seq: number; scheduled_pause_after_ms: number | null }>,
-  thresholdMs = 30_000,
+  thresholdMs = 5_000,
 ): Array<{ seq: number; ms: number }> {
   return segments
     .filter((segment) => (segment.scheduled_pause_after_ms ?? 0) > thresholdMs)

@@ -151,12 +151,15 @@ describe("distributeThetaTime", () => {
 });
 
 describe("buildCountedSequence", () => {
-  it("includes enforced breaks for breath sequences", () => {
+  it("uses fixed 4/2/8/2 breath cycles fit into the budget", () => {
     const seq = buildCountedSequence("breath", 4, 60);
-    expect(seq.beats.some((b) => b.kind === "pause")).toBe(true);
-    expect(seq.beats.some((b) => b.kind === "hold")).toBe(true);
-    expect(seq.beats.reduce((a, b) => a + b.sec, 0)).toBe(60);
-    expect(seq.total_sec).toBe(60);
+    expect(seq.count).toBe(3); // floor(60/16)=3
+    expect(seq.total_sec).toBe(48);
+    expect(seq.beats.filter((b) => b.kind === "inhale").every((b) => b.sec === 4)).toBe(true);
+    expect(seq.beats.filter((b) => b.kind === "hold").every((b) => b.sec === 2)).toBe(true);
+    expect(seq.beats.filter((b) => b.kind === "exhale").every((b) => b.sec === 8)).toBe(true);
+    expect(seq.beats.filter((b) => b.kind === "pause").every((b) => b.sec === 2)).toBe(true);
+    expect(seq.beats.reduce((a, b) => a + b.sec, 0)).toBe(48);
   });
 
   it("includes pauses between countdown counts", () => {

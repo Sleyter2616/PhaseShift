@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { spliceCountedSequenceSegments } from "../compiler/counted-sequence-segments";
 import { injectServerOwnedFields } from "../compiler/inject-server-fields";
 import { normalizeManifest } from "../compiler/normalize";
 import {
@@ -142,8 +143,13 @@ export async function compileManifest(
       console.error(`inject: ${action}`);
     }
 
-    const normalized = normalizeManifest(injected.manifest);
-    normalizeActions = [...injected.actions, ...normalized.actions];
+    const spliced = spliceCountedSequenceSegments(injected.manifest, compilerInput);
+    for (const action of spliced.actions) {
+      console.error(`counted-seq: ${action}`);
+    }
+
+    const normalized = normalizeManifest(spliced.manifest);
+    normalizeActions = [...injected.actions, ...spliced.actions, ...normalized.actions];
     for (const action of normalized.actions) {
       console.error(`normalize: ${action}`);
     }

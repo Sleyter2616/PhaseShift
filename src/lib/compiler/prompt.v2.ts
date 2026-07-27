@@ -35,19 +35,21 @@ except one valid JSON object matching the provided schema.
    and step 12 (Closure). At least one segment per listed step. No other theta steps.
 4. Each theta step's total target_duration_sec across its segments must equal the
    matching skeleton.theta_steps[].target_sec for that step.
-5. Counted sequences (breaths, countdowns, energizing breaths, count-ups) MUST use
-   the server-provided timings in skeleton.counted_sequences VERBATIM. You may not
-   compress, skip, or rearrange their inhale/hold/exhale/pause/count beats. State
-   the ratios and pauses as given; embed matching <break time="X.Xs"/> tags and
-   pause_after_ms so the spoken pacing matches the beat table.
+5. Counted sequences (breaths, countdowns, energizing breaths, count-ups) are
+   SERVER-INSERTED as micro-segments with pause_after_ms pacing. Do NOT emit
+   breath/countdown/count-up cycles yourself. Do NOT narrate timing ratios
+   ("four in, two hold"). Do NOT embed <break> tags for counted sequences.
+   Write only non-counted content for alpha/gamma; the server splices the
+   timed cue micro-segments in.
 
 ## STRUCTURAL RULES
 1. Word budget per segment = pacing_wpm * target_duration_sec / 60. Treat this as
    a ceiling. Aim for 85-95% of the word budget so post-synthesis silence can stretch.
-2. Pauses: inline pauses use <break time="X.Xs"/> with a hard maximum of 3.0s per
-   break (TTS constraint). Silence longer than 3s belongs in pause_after_ms, never
-   in text. Alpha and theta segments must carry at least 20% of their duration as
-   breaks plus pause_after_ms. Never pad duration with filler words.
+2. Pauses: optional inline <break time="X.Xs"/> must use NUMERIC seconds only
+   (e.g. "1.5s", never "one.5s" or worded numbers) with a hard maximum of 3.0s.
+   Silence longer than 3s belongs in pause_after_ms, never in text. Alpha and
+   theta segments must carry at least 20% of their duration as pause_after_ms
+   (prefer pause_after_ms over inline breaks). Never pad duration with filler words.
 3. Every intake string (goal_statement, both localization fields, all three
    triangulation items, every not_list item, every feature, every sync_action)
    appears verbatim at least once, in its designated step (when that step is present
@@ -99,22 +101,18 @@ Playback is in the user's own cloned voice.
 | 12 Closure | first | introspective | thief | Felt accomplishment. Lock-in declarations. No gratitude-to-external-agent language. |
 
 ## ALPHA (induction)
-Use skeleton.counted_sequences.alpha_breath for slow breathing with extended exhales
-(state the inhale/hold/exhale/pause timings exactly). Use progressive muscle
-tension-release cycles moving feet to face. At most one full countdown across alpha,
-placed in the final alpha segment only, using skeleton.counted_sequences.alpha_countdown
-beat timings verbatim. Earlier alpha segments deepen via breath and body cues only —
-no numeric countdown sequences. Introduce the countdown with one framing line before
-it begins. Calm imperative. Purpose: releasing tension frees nervous system resources
-for the work ahead. When beta is absent, fold a brief orienting beat into the opening
-of alpha.
+Do NOT write breath cycles, countdown numbers, or timing ratios — the server
+inserts alpha_breath and alpha_countdown micro-segments with real silence via
+pause_after_ms. Your alpha segments cover progressive muscle tension-release
+(feet to face) and calm body cues only. Calm imperative. Purpose: releasing
+tension frees nervous system resources for the work ahead. When beta is absent,
+fold a brief orienting beat into the opening of alpha.
 
 ## GAMMA (exit)
-Use skeleton.counted_sequences.gamma_energizing for the energizing breath protocol
-(rounds and holds per the beat table). Use skeleton.counted_sequences.gamma_countup
-for count-up with escalating physical cues. Then direct the listener into
-sync_actions[0] as the immediate next physical act after the session. Match gamma
-pacing_wpm. Imperative, high energy, tempered by posture rules above.
+Do NOT write energizing-breath rounds or count-up numbers — the server inserts
+gamma_energizing and gamma_countup micro-segments. Your gamma segments give
+high-energy body cues and direct the listener into sync_actions[0] as the
+immediate next physical act after the session. Imperative, tempered by posture.
 
 ## CONTENT RULES (mandatory)
 - Write ALL numerals, currency, and dates as spoken words, never symbols or digits
@@ -157,10 +155,12 @@ specify a perspective). Theta step values must match skeleton.steps in order.
 ## SELF-CHECK (run before emitting)
 1. JSON matches the OUTPUT SHAPE above (model-owned fields only).
 2. Phase sums of target_duration_sec equal skeleton phase budgets (skip beta when
-   beta_sec=0).
+   beta_sec=0). Server will reserve alpha/gamma time for counted micro-segments —
+   leave room; do not fill alpha/gamma entirely with text that crowds them out.
 3. Theta unique step order exactly matches skeleton.steps.
 4. Each theta step's duration sum equals skeleton.theta_steps target_sec.
-5. Counted-sequence timings match skeleton.counted_sequences (no compression).
+5. No counted-sequence narration, no timing ratios spoken aloud, no worded
+   numbers inside <break> tags. Any inline <break> uses numeric seconds ≤ 3.0s.
 6. Per-segment word counts do not exceed the calculated budget (usually 85-95%).
 7. All intake strings for PRESENT steps appear verbatim. No banned tokens.
 If any check fails, fix and re-emit. Output only the final JSON.`;

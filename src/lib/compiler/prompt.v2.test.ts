@@ -15,8 +15,14 @@ describe("prompt.v2.0", () => {
     expect(COMPILER_PROMPT_V2).toContain("## SKELETON GIVENS (do not renegotiate)");
     expect(COMPILER_PROMPT_V2).toContain("SERVER-COMPUTED SESSION SKELETON");
     expect(COMPILER_PROMPT_V2).toContain("When beta_sec is 0, OMIT the beta phase");
-    expect(COMPILER_PROMPT_V2).toContain("MUST use");
-    expect(COMPILER_PROMPT_V2).toContain("skeleton.counted_sequences VERBATIM");
+    expect(COMPILER_PROMPT_V2).toContain("SERVER-INSERTED as micro-segments");
+    expect(COMPILER_PROMPT_V2).toContain("Do NOT embed <break> tags for counted sequences");
+  });
+
+  it("forbids worded break tags and counted-sequence narration", () => {
+    expect(COMPILER_PROMPT_V2).toContain("NUMERIC seconds only");
+    expect(COMPILER_PROMPT_V2).toContain('never "one.5s"');
+    expect(COMPILER_PROMPT_V2).toContain("Do NOT narrate timing ratios");
   });
 
   it("defines OUTPUT SHAPE for model-owned fields only", () => {
@@ -37,7 +43,7 @@ describe("prompt.v2.0", () => {
     expect(COMPILER_PROMPT_V2).toContain("at least 20% of their duration as");
     expect(COMPILER_PROMPT_V2).toContain("## CONTENT RULES (mandatory)");
     expect(COMPILER_PROMPT_V2).toContain('write "one million dollars", not "$1M"');
-    expect(COMPILER_PROMPT_V2).toContain("At most one full countdown across alpha");
+    expect(COMPILER_PROMPT_V2).toContain("progressive muscle tension-release");
   });
 
   it("includes posture-driven language rules", () => {
