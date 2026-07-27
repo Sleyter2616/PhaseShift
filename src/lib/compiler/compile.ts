@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { injectServerOwnedFields } from "../compiler/inject-server-fields";
 import { normalizeManifest } from "../compiler/normalize";
 import {
   applySpeakableOutputNormalization,
@@ -136,9 +137,14 @@ export async function compileManifest(
       continue;
     }
 
-    const normalized = normalizeManifest(parsed);
-    normalizeActions = normalized.actions;
-    for (const action of normalizeActions) {
+    const injected = injectServerOwnedFields(parsed, compilerInput);
+    for (const action of injected.actions) {
+      console.error(`inject: ${action}`);
+    }
+
+    const normalized = normalizeManifest(injected.manifest);
+    normalizeActions = [...injected.actions, ...normalized.actions];
+    for (const action of normalized.actions) {
       console.error(`normalize: ${action}`);
     }
 

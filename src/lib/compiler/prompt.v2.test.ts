@@ -19,6 +19,16 @@ describe("prompt.v2.0", () => {
     expect(COMPILER_PROMPT_V2).toContain("skeleton.counted_sequences VERBATIM");
   });
 
+  it("defines OUTPUT SHAPE for model-owned fields only", () => {
+    expect(COMPILER_PROMPT_V2).toContain("## OUTPUT SHAPE (model-owned fields only)");
+    expect(COMPILER_PROMPT_V2).toContain("do NOT emit those server-owned fields");
+    expect(COMPILER_PROMPT_V2).toContain('"pause_after_ms"');
+    expect(COMPILER_PROMPT_V2).toContain('"text"');
+    expect(COMPILER_PROMPT_V2).not.toContain(
+      '"total_duration_sec": <sum of all phase_budget_sec values>',
+    );
+  });
+
   it("ports core content rules from v1.x", () => {
     expect(COMPILER_PROMPT_V2).toContain("present tense only");
     expect(COMPILER_PROMPT_V2).toContain("Banned: will, would, could, might, hope, wish");

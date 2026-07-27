@@ -124,9 +124,40 @@ pacing_wpm. Imperative, high energy, tempered by posture rules above.
 - Never read dates as digit sequences; input dates are already in natural speech —
   quote them verbatim.
 
+## OUTPUT SHAPE (model-owned fields only)
+Emit exactly one JSON object. The SERVER stamps meta.total_duration_sec,
+meta.phase_budget_sec, meta.entrainment_plan, and per-segment seq + pacing_wpm
+after you return — do NOT emit those server-owned fields (if you do, they are
+overwritten). Emit only:
+
+{
+  "meta": {
+    "goal_version_id": "<echo the input goal_version_id>"
+  },
+  "segments": [
+    {
+      "phase": "beta" | "alpha" | "theta" | "gamma",
+      "step": <integer 1-12 inside theta; null otherwise>,
+      "title": "<optional short segment label>",
+      "perspective": "first" | "second" | "third" | null,
+      "temporal_horizon": "introspective" | "retrospective" | "protospective" | null,
+      "archetype": "child"|"trickster"|"warrior"|"thief"|"magician"|"creator" | null,
+      "target_duration_sec": <integer seconds; phase sums must match skeleton budgets>,
+      "pause_after_ms": <integer >= 0>,
+      "text": "<the spoken script text, including <break time=\\"X.Xs\\"/> tags>"
+    }
+  ]
+}
+
+Segment order is the playback order (server assigns seq 1..N from this array order).
+Set perspective, temporal_horizon, and archetype from the STEP SPECIFICATIONS table
+(null where the table gives none, and null outside theta except where phase sections
+specify a perspective). Theta step values must match skeleton.steps in order.
+
 ## SELF-CHECK (run before emitting)
-1. JSON valid against schema.
-2. Phase sums equal skeleton phase budgets (skip beta when beta_sec=0).
+1. JSON matches the OUTPUT SHAPE above (model-owned fields only).
+2. Phase sums of target_duration_sec equal skeleton phase budgets (skip beta when
+   beta_sec=0).
 3. Theta unique step order exactly matches skeleton.steps.
 4. Each theta step's duration sum equals skeleton.theta_steps target_sec.
 5. Counted-sequence timings match skeleton.counted_sequences (no compression).
