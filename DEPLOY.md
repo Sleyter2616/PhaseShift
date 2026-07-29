@@ -24,9 +24,13 @@ Set these on the Vercel project (**Production**). Leave secrets empty in git; ne
 | `INNGEST_SIGNING_KEY` | **prod-only** — from Inngest Cloud / Vercel integration |
 | `STRIPE_SECRET_KEY` | **prod-only live** `sk_live_…` (not `sk_test_…`) |
 | `STRIPE_WEBHOOK_SECRET` | Signing secret from the **prod** Dashboard webhook endpoint |
-| `STRIPE_PRICE_TOPUP` | Live Price ID for $6 top-up |
+| `STRIPE_PRICE_TOPUP` | Live Price ID for $8 / 80-min top-up |
 | `STRIPE_PRICE_GUIDED` | Live Price ID for Guided subscription |
 | `STRIPE_PRICE_PRACT` | Live Price ID for Practitioner subscription |
+| `WELCOME_GRANT_ENABLED` | Set to **`1`** to grant new users topup minutes when they complete `/welcome`; anything else (or unset) = off. Flip + redeploy to disable — no code change. |
+| `WELCOME_GRANT_MINUTES` | Optional; integer minutes for the welcome topup (default **400**) |
+| `COMPILER_PROMPT_VERSION` | Optional; default `v2.5`. Pin an older immutable prompt if needed |
+| `SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN` | Optional error tracking |
 
 **Do not set in production:**
 
@@ -44,14 +48,14 @@ In the prod Supabase project → **Authentication → URL configuration**:
    - `https://your-domain.com/auth/callback` (if used)
    - `https://your-domain.com/**` or the exact paths your app uses after magic-link / OAuth
 
-Apply migrations through `0010_lock_trigger_fn.sql` on the prod database before serving traffic.
+Apply migrations through `0012_minutes.sql` on the prod database before serving traffic.
 
 ## Inngest Cloud
 
 1. Deploy the Next.js app so `/api/inngest` is reachable.
 2. Prefer the [Inngest Vercel integration](https://www.inngest.com/docs/deploy/vercel) (sets `INNGEST_EVENT_KEY` / `INNGEST_SIGNING_KEY` and syncs on deploy), **or** create an app in the Inngest dashboard and paste the keys into Vercel manually.
 3. Confirm the serve URL is `https://your-domain.com/api/inngest` (or set `INNGEST_SERVE_ORIGIN`).
-4. Sync / deploy once and verify functions `generate-script` and `synthesize-segment` appear in the Inngest UI.
+4. Sync / deploy once and verify functions `generate-script`, `synthesize-segment`, and `stuck-generation-reaper` (cron every 5 min) appear in the Inngest UI.
 
 Local reminder: use `INNGEST_DEV=1` and `npx inngest-cli@latest dev -u http://localhost:3000/api/inngest` — never point local at prod keys.
 

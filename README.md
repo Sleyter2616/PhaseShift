@@ -8,10 +8,16 @@ See the full execution plan in [`docs/blueprint.md`](docs/blueprint.md). Agent o
 
 ## Features (current)
 
-- **Variable session lengths:** 10 / 15 / 30 / 45 minutes (40 retired). Phase budgets are **server-computed** (`src/lib/compiler/skeleton.ts`).
-- **Step model B:** Visualize (1) + Closure (12) bookends; contiguous middle steps from 2..11, count capped by length.
-- **Compiler prompt v2.0** consumes the skeleton (budgets, steps, posture, counted-sequence timings). Fallback: `COMPILER_PROMPT_VERSION=v1.4`.
-- **Minutes billing:** two-pool model — subscription minutes (monthly) + top-up minutes (never expire); cost = `length_min ×` stock `1×` / own-voice `2×`.
+- **Variable session lengths:** 10 / 15 / 30 / 45 minutes (40 retired). Phase budgets are **server-computed** and sum to `length × 60`; delivered length matches via distributed theta dwelling silence. Billing = exact budgeted length × voice multiplier.
+- **Step model B:** Visualize (1) + Closure (12) bookends; contiguous middle steps from 2..11, count capped by length. Wizard length picker + prior-session reuse; middle-step picker UI still deferred.
+- **Self-paced breathing:** session states the 4/2/8/2 pattern once, then guides over the user's own pacing (not live breath cueing). Countdown = numbers only into silence.
+- **Compiler prompt v2.5** (default): skeleton givens, depth-by-length, self-paced breath, word-budget minimums, person-aware intake. Pin older via `COMPILER_PROMPT_VERSION` (incl. `v1.4`).
+- **Session content QA:** pre-synthesis person-agreement fix (`my→your`) and broken-script block.
+- **Fail-open compile:** underwrite expand runs as a separate Inngest step (never hangs the main compile).
+- **Stuck-generation reaper:** Inngest cron every 5 min marks hard-killed `generating` scripts failed and refunds minutes idempotently.
+- **Minutes billing:** two-pool — subscription (monthly) + top-up (never expire); cost = `length_min ×` stock `1×` / own-voice `2×`. Optional **welcome grant** (`WELCOME_GRANT_ENABLED=1`) credits new users once on onboarding.
+- **Tone mix:** entrainment bed capped well below voice (`TONE_GAIN_MAX=0.15`).
+- **Posture:** sitting (default) | lying — affects body-reference language.
 - **Sentry** error tracking for the App Router (`@sentry/nextjs`).
 - Per-segment ElevenLabs TTS with content-hash dedupe; client-side binaural/isochronic entrainment; Inngest generation pipeline.
 
@@ -44,7 +50,9 @@ Copy `.env.example` to `.env.local` and fill in:
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Browser + user-scoped server client |
 | `SUPABASE_SERVICE_ROLE_KEY` | Server-only admin (signed URLs, refunds, jobs) |
 | `ANTHROPIC_API_KEY` | Claude compiler |
-| `COMPILER_PROMPT_VERSION` | Optional; default `v2.0`. Set `v1.4` for legacy prompt |
+| `COMPILER_PROMPT_VERSION` | Optional; default **`v2.5`**. Pin `v2.4`…`v2.0` or `v1.4` for older prompts |
+| `WELCOME_GRANT_ENABLED` | Set to `1` to grant new users topup minutes on `/welcome` complete; anything else = off |
+| `WELCOME_GRANT_MINUTES` | Welcome topup amount (default `400`) |
 | `ELEVENLABS_API_KEY` | ElevenLabs TTS (live synthesis) |
 | `ELEVENLABS_VOICES_API_KEY` | Instant voice clone (`POST /api/voice`) |
 | `ELEVENLABS_STOCK_VOICE_ID` | Default stock voice for `POST /api/scripts` |
@@ -103,7 +111,7 @@ curl -s -X POST http://localhost:3000/api/scripts \
   -d "$(pnpm tsx -e "import { intake45Min } from './src/lib/fixtures/intake.ts'; process.stdout.write(JSON.stringify(intake45Min))")"
 ```
 
-Defaults: **45 min**, full middle steps, sitting. Override with `session.duration_min` / `length_min` (`10|15|30|45`), `middle_start`, `middle_count`, `posture`.
+Defaults: **30 min** wizard default (override to 10/15/45), skeleton-chosen middle steps, sitting. Override with `session.duration_min` / `length_min` (`10|15|30|45`), `middle_start`, `middle_count`, `posture`.
 
 Minutes cost = `length_min ×` (stock `1` | own-voice `2`). Expect `202` with `{ "script_id": "..." }`, or `402` with `{ "error": "insufficient_minutes" }`.
 
@@ -147,7 +155,7 @@ http://localhost:3000/session/<script_id>
 
 ### Intake wizard (`/wizard`)
 
-Seven-step client flow. API accepts variable length + step selection; **wizard UI for length/middle steps lands in v0.5-2** (defaults remain 45 / full arc / sitting for now).
+Seven-step client flow with **length picker** (10/15/30/45), posture, entrainment, and prior-session answer reuse. Contiguous middle-step picker UI is still deferred (API accepts `middle_start` / `middle_count`; skeleton chooses the middle for the selected length).
 
 ### Voice clone (`/voice`)
 
@@ -178,10 +186,11 @@ src/
   app/billing/            Checkout / portal UI
   app/wizard/             7-step intake wizard
   app/session/[scriptId]/ Player
-  lib/compiler/           skeleton.ts, prompt.v2.ts (+ immutable v1.x), compile
-  lib/billing/            minutes.ts (two-pool), Stripe helpers
+  lib/compiler/           skeleton.ts, prompt.v2.5.ts (+ immutable v2.x / v1.x), script-qa, compile
+  lib/billing/            minutes.ts (two-pool), welcome-grant, Stripe helpers
   lib/contracts/          intake + manifest Zod
   lib/sentry/             capture helpers
+  inngest/functions/      generate-script, synthesize-segment, stuck-generation-reaper
 scripts/                  seed, verify, minutes-concurrency
 supabase/migrations/      0001–0012
 AGENTS.md                 Coding-agent operating rules
