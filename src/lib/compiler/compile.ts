@@ -34,10 +34,8 @@ import {
 import { stripCodeFences } from "../compiler/strip-fences";
 import {
   estimateManifestWallClockSec,
-  formatLengthExpandRetryMessage,
   isCompileEstimateUnderfilled,
   logCompileLengthTelemetry,
-  MAX_LENGTH_EXPAND_RETRIES,
   summarizeThetaWordShortfalls,
 } from "./estimate-duration";
 import { logScriptQaFindings, runScriptQa } from "./script-qa";
@@ -65,6 +63,19 @@ export class CompilerError extends Error {
   }
 }
 
+export class CompileStepTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CompileStepTimeoutError";
+  }
+}
+
+/**
+ * Soft ceiling for a single compile step. Vercel/Inngest step budget is ~300s;
+ * leave headroom so we fail-open instead of FUNCTION_INVOCATION_TIMEOUT.
+ */
+export const COMPILE_STEP_BUDGET_MS = 240_000;
+
 export function formatCompilerFailureMessage(error: CompilerError): string {
   const detail = error.validationErrors?.length
     ? `${error.message}: ${error.validationErrors.join(" | ")}`
@@ -75,7 +86,7 @@ export function formatCompilerFailureMessage(error: CompilerError): string {
 const RETRY_SUFFIX =
   "\n\nRe-emit ONLY the corrected JSON object. No explanation. No word counts.\nWhen fixing text-level errors, do not change any target_duration_sec value or the segment structure.";
 
-const LENGTH_EXPAND_SUFFIX =
+export const LENGTH_EXPAND_SUFFIX =
   "\n\nRe-emit ONLY the corrected JSON object. Expand underfilled theta steps to at least each step's target_words minimum with denser sensory detail. Do not add steps. Keep target_duration_sec values and segment/step structure unchanged.";
 
 function logCompileAttempt(
@@ -136,13 +147,26 @@ function promptForVersion(version: CompilerPromptVersion): {
   return { system: COMPILER_PROMPT_V2_5, promptVersion: PROMPT_VERSION_V2_5 };
 }
 
+export type CompileManifestOptions = {
+  client?: CompileMessageClient;
+  onAttempt?: (info: CompileAttemptInfo) => void;
+  promptVersion?: CompilerPromptVersion;
+  /**
+   * When set, used as the first user message (length-expand recompile in a
+   * separate Inngest step). Length underfill never triggers another Claude
+   * call inside this function — fail-open and let the pipeline decide.
+   */
+  initialUserMessage?: string;
+};
+
+/**
+ * One compile pass (plus at most one in-process validation retry).
+ * Does NOT recompile for length underfill — that must be a separate Inngest
+ * step so each Claude call gets a fresh ~300s budget.
+ */
 export async function compileManifest(
   compilerInput: CompilerInput,
-  options?: {
-    client?: CompileMessageClient;
-    onAttempt?: (info: CompileAttemptInfo) => void;
-    promptVersion?: CompilerPromptVersion;
-  },
+  options?: CompileManifestOptions,
 ): Promise<Manifest> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey && !options?.client) {
@@ -155,14 +179,14 @@ export async function compileManifest(
   const { system } = promptForVersion(version);
   const expectedThetaSteps = compilerInput.skeleton.steps;
 
-  let userMessage = JSON.stringify(compilerInputForModel(compilerInput));
+  let userMessage =
+    options?.initialUserMessage ?? JSON.stringify(compilerInputForModel(compilerInput));
   let lastErrors: string[] = [];
   let lastRawText = "";
   const attempts: CompileAttemptInfo[] = [];
-  let lengthExpandRetries = 0;
   let validationRetryUsed = false;
-  // Room for: initial + 1 validation retry + up to 2 length expands.
-  const maxAttempts = 1 + 1 + MAX_LENGTH_EXPAND_RETRIES;
+  // Initial + at most one validation fix (same step; usually cheap).
+  const maxAttempts = 2;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const response = await client.messages.create({
@@ -237,49 +261,19 @@ export async function compileManifest(
         );
         const underfilled = isCompileEstimateUnderfilled(estimatedSec, targetSec);
 
-        if (underfilled && lengthExpandRetries < MAX_LENGTH_EXPAND_RETRIES) {
-          logCompileLengthTelemetry({
-            estimatedSec,
-            targetSec,
-            attempt: attempt + 1,
-            lengthExpandRetries,
-            shortfalls,
-            accepting: false,
-          });
-          const expandMessage = formatLengthExpandRetryMessage({
-            estimatedSec,
-            targetSec,
-            thetaSteps: compilerInput.skeleton.theta_steps,
-            segments: result.data.segments,
-          });
-          lastErrors = [
-            `compile length estimate ${estimatedSec.toFixed(1)}s < 97% of target ${targetSec}s`,
-          ];
-          console.error(`length-gate: ${lastErrors[0]} (expand ${lengthExpandRetries + 1}/${MAX_LENGTH_EXPAND_RETRIES})`);
-          const attemptInfo = {
-            attempt: attempt + 1,
-            validationErrors: lastErrors,
-            validationWarnings: result.warnings,
-            normalizeActions,
-          };
-          attempts.push(attemptInfo);
-          options?.onAttempt?.(attemptInfo);
-          lengthExpandRetries += 1;
-          userMessage = `${JSON.stringify(compilerInputForModel(compilerInput))}\n\n${expandMessage}${LENGTH_EXPAND_SUFFIX}`;
-          continue;
-        }
-
+        // Fail-open on length: never recompile here. Pipeline may schedule
+        // compile-attempt-2 as its own Inngest step.
         logCompileLengthTelemetry({
           estimatedSec,
           targetSec,
           attempt: attempt + 1,
-          lengthExpandRetries,
+          lengthExpandRetries: 0,
           shortfalls,
           accepting: true,
         });
         if (underfilled) {
           console.error(
-            `length-gate: accepting underfill after ${lengthExpandRetries} expand retries; post-synth dwelling will fine-tune`,
+            `length-gate: underfill in this pass (estimate ${estimatedSec.toFixed(1)}s < 97% of ${targetSec}s); fail-open — pipeline may expand in a separate step`,
           );
         }
 
@@ -321,6 +315,35 @@ export async function compileManifest(
     lastRawText,
     attempts,
   );
+}
+
+/**
+ * Run compileManifest with a soft time budget. On timeout, throws
+ * CompileStepTimeoutError so the caller can fail-open (attempt-2) or fail
+ * (attempt-1 with no fallback).
+ */
+export async function compileManifestWithBudget(
+  compilerInput: CompilerInput,
+  options?: CompileManifestOptions & { budgetMs?: number },
+): Promise<Manifest> {
+  const budgetMs = options?.budgetMs ?? COMPILE_STEP_BUDGET_MS;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      compileManifest(compilerInput, options),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(
+            new CompileStepTimeoutError(
+              `compile exceeded ${budgetMs}ms step budget — aborting to avoid FUNCTION_INVOCATION_TIMEOUT`,
+            ),
+          );
+        }, budgetMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export const PROMPT_VERSION = PROMPT_VERSION_V2_5;

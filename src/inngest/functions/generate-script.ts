@@ -3,9 +3,16 @@ import { inngest } from "../client";
 import { getServiceClient } from "@/lib/db/service-client";
 import {
   CompilerError,
-  compileManifest,
+  CompileStepTimeoutError,
+  compileManifestWithBudget,
   formatCompilerFailureMessage,
 } from "@/lib/compiler/compile";
+import {
+  assessCompileLength,
+  resolveCompileFailOpen,
+  runCompileAttempt2FailOpen,
+  shouldRunCompileAttempt2,
+} from "@/lib/pipeline/compile-length-steps";
 import { applyDedupeHits, linkPendingSegmentsFromAudioCache, planSegmentDedupe } from "@/lib/pipeline/dedupe-plan";
 import { deriveSegmentRows } from "@/lib/pipeline/segment-rows";
 import { reconcileSegments } from "@/lib/pipeline/reconcile-persist";
@@ -16,6 +23,7 @@ import {
 } from "@/lib/pipeline/synthesis-identity";
 import { capturePathError } from "@/lib/sentry/capture";
 import type { CompilerInput } from "@/lib/session/derive";
+import type { Manifest } from "@/lib/contracts/manifest";
 import { synthesizeSegment } from "./synthesize-segment";
 
 export const generateScript = inngest.createFunction(
@@ -54,19 +62,49 @@ export const generateScript = inngest.createFunction(
         return loadScriptSynthesisIdentity(getServiceClient(), scriptCtx);
       });
 
-      const manifest = await step.run("compile", async () => {
+      // Each Claude compile is its own step → fresh ~300s budget.
+      // Never stack two compiles in one invocation (FUNCTION_INVOCATION_TIMEOUT).
+      const attempt1 = await step.run("compile-attempt-1", async () => {
         try {
-          // compileManifest runs speakable-output + script-qa before return
-          // (pre-synthesis: person-agreement auto-fix, artifact/banned flags).
-          return await compileManifest(scriptCtx.compiler_input);
+          return await compileManifestWithBudget(scriptCtx.compiler_input);
         } catch (error) {
           if (error instanceof CompilerError) {
             await markScriptFailed(scriptId, formatCompilerFailureMessage(error));
             throw new NonRetriableError(formatCompilerFailureMessage(error));
           }
+          if (error instanceof CompileStepTimeoutError) {
+            await markScriptFailed(scriptId, error.message);
+            throw new NonRetriableError(error.message);
+          }
           throw error;
         }
       });
+
+      const lengthCheck = await step.run("compile-length-check", async () => {
+        const check = assessCompileLength(attempt1, scriptCtx.compiler_input);
+        console.error(
+          `compile-length-check: estimate=${check.estimatedSec.toFixed(1)}s ` +
+            `target=${check.targetSec}s underfilled=${check.underfilled ? 1 : 0}`,
+        );
+        return check;
+      });
+
+      let manifest: Manifest = attempt1;
+      if (shouldRunCompileAttempt2(lengthCheck)) {
+        const attempt2 = await step.run("compile-attempt-2", async () => {
+          // Fail-open: timeout / validation failure → keep attempt-1.
+          return runCompileAttempt2FailOpen(
+            scriptCtx.compiler_input,
+            lengthCheck.expandUserMessage!,
+          );
+        });
+        manifest = resolveCompileFailOpen({ attempt1, attempt2 });
+        if (!attempt2) {
+          console.error(
+            "compile-attempt-2: fail-open to attempt-1; dwelling will fine-tune length",
+          );
+        }
+      }
 
       await step.run("persist-segments", async () => {
         const supabase = getServiceClient();
