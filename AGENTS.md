@@ -49,5 +49,17 @@ Generation billing is the **two-pool minutes** model (`subscription_minutes` + `
 
 ## Docs vs code
 
-- When behavior changes land, keep `docs/blueprint.md`, `README.md`, and `AMBIGUITIES.md` aligned in a follow-up (or same PR if the user asks).
+- **REQUIREMENT:** Any PR that changes user-visible behavior, billing, the compiler prompt version, env vars, or the data model **MUST** update `docs/blueprint.md` in the **SAME PR**. A behavior change with stale docs is an incomplete PR.
+- Also keep `README.md`, `DEPLOY.md` / `.env.example` (for new env vars), and `AMBIGUITIES.md` aligned in that same PR when they are affected.
 - Prefer documenting **current reality** over aspirational roadmap copy.
+
+## Phase PR checklist
+
+Every phase PR should satisfy:
+
+1. **Tests green** — `pnpm typecheck && pnpm lint && pnpm test`
+2. **Blueprint updated** if behavior changed (`docs/blueprint.md` in the same PR)
+3. **New env vars documented** (`.env.example` and `DEPLOY.md` / `README.md` as applicable)
+4. **Prompt version bumped** if the compiler prompt changed (immutable `prompt.vN+1.ts`; never edit a shipped version)
+5. **AMBIGUITIES.md** pruned or extended as needed (resolved items out; new open decisions in)
+
