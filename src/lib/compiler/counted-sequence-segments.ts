@@ -105,8 +105,8 @@ function scalePhaseTargets(
 
 /**
  * Splice server-owned counted-sequence micro-segments into alpha/gamma.
- * Model content for those phases is kept but rescaled around the reserved
- * counted-sequence budget. Breath/countdown timing is never model-emitted.
+ * Alpha: countdown only (breath is model-written self-paced instruction).
+ * Gamma: energizing + countup. Model content is rescaled around reserved budget.
  */
 export function spliceCountedSequenceSegments(
   raw: unknown,
@@ -124,11 +124,6 @@ export function spliceCountedSequenceSegments(
 
   const existing = (raw.segments as unknown[]).filter(isRecord) as unknown as ManifestSegment[];
 
-  const alphaBreath = expandCountedSequenceToMicroSegments(
-    skeleton.counted_sequences.alpha_breath,
-    "alpha",
-    pacing.alpha_wpm,
-  );
   const alphaCountdown = expandCountedSequenceToMicroSegments(
     skeleton.counted_sequences.alpha_countdown,
     "alpha",
@@ -145,9 +140,7 @@ export function spliceCountedSequenceSegments(
     pacing.gamma_wpm,
   );
 
-  const reservedAlpha =
-    skeleton.counted_sequences.alpha_breath.total_sec +
-    skeleton.counted_sequences.alpha_countdown.total_sec;
+  const reservedAlpha = skeleton.counted_sequences.alpha_countdown.total_sec;
   const reservedGamma =
     skeleton.counted_sequences.gamma_energizing.total_sec +
     skeleton.counted_sequences.gamma_countup.total_sec;
@@ -203,7 +196,6 @@ export function spliceCountedSequenceSegments(
 
   const segments: ManifestSegment[] = [
     ...other.filter((s) => s.phase === "beta"),
-    ...alphaBreath,
     ...scaledAlpha,
     ...alphaCountdown,
     ...other.filter((s) => s.phase === "theta"),
@@ -217,7 +209,7 @@ export function spliceCountedSequenceSegments(
   }));
 
   actions.push(
-    `spliced counted sequences: alpha_breath=${alphaBreath.length}, alpha_countdown=${alphaCountdown.length}, gamma_energizing=${gammaEnergizing.length}, gamma_countup=${gammaCountup.length}`,
+    `spliced counted sequences: alpha_countdown=${alphaCountdown.length}, gamma_energizing=${gammaEnergizing.length}, gamma_countup=${gammaCountup.length}`,
   );
 
   const manifest: Manifest = {

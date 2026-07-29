@@ -205,6 +205,15 @@ describe("buildSessionSkeleton defaults", () => {
         skeleton.phase_budget.gamma_sec,
     ).toBe(1800);
   });
+
+  it("omits alpha_breath; keeps server-led countdown", () => {
+    const skeleton = buildSessionSkeleton({ length_min: 15 });
+    expect(skeleton.counted_sequences).not.toHaveProperty("alpha_breath");
+    expect(skeleton.counted_sequences.alpha_countdown.kind).toBe("countdown");
+    expect(skeleton.counted_sequences.alpha_countdown.beats.some((b) => b.kind === "count")).toBe(
+      true,
+    );
+  });
 });
 
 describe("v0.5-1.6 length-ladder calibration", () => {
