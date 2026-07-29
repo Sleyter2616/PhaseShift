@@ -56,6 +56,8 @@ export const generateScript = inngest.createFunction(
 
       const manifest = await step.run("compile", async () => {
         try {
+          // compileManifest runs speakable-output + script-qa before return
+          // (pre-synthesis: person-agreement auto-fix, artifact/banned flags).
           return await compileManifest(scriptCtx.compiler_input);
         } catch (error) {
           if (error instanceof CompilerError) {

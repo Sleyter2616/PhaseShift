@@ -27,6 +27,10 @@ import {
   COMPILER_PROMPT_V2_4,
   PROMPT_VERSION as PROMPT_VERSION_V2_4,
 } from "../compiler/prompt.v2.4";
+import {
+  COMPILER_PROMPT_V2_5,
+  PROMPT_VERSION as PROMPT_VERSION_V2_5,
+} from "../compiler/prompt.v2.5";
 import { stripCodeFences } from "../compiler/strip-fences";
 import {
   estimateManifestWallClockSec,
@@ -36,6 +40,7 @@ import {
   MAX_LENGTH_EXPAND_RETRIES,
   summarizeThetaWordShortfalls,
 } from "./estimate-duration";
+import { logScriptQaFindings, runScriptQa } from "./script-qa";
 import { validateManifest, type Manifest } from "../contracts/manifest";
 import { compilerInputForModel, type CompilerInput } from "../session/derive";
 
@@ -82,9 +87,16 @@ function logCompileAttempt(
   );
 }
 
-export type CompilerPromptVersion = "v1.4" | "v2.0" | "v2.1" | "v2.2" | "v2.3" | "v2.4";
+export type CompilerPromptVersion =
+  | "v1.4"
+  | "v2.0"
+  | "v2.1"
+  | "v2.2"
+  | "v2.3"
+  | "v2.4"
+  | "v2.5";
 
-/** Default v2.4; set COMPILER_PROMPT_VERSION to pin an older prompt. */
+/** Default v2.5; set COMPILER_PROMPT_VERSION to pin an older prompt. */
 export function resolveCompilerPromptVersion(
   override?: CompilerPromptVersion,
 ): CompilerPromptVersion {
@@ -95,7 +107,8 @@ export function resolveCompilerPromptVersion(
   if (env === "v2.1") return "v2.1";
   if (env === "v2.2") return "v2.2";
   if (env === "v2.3") return "v2.3";
-  return "v2.4";
+  if (env === "v2.4") return "v2.4";
+  return "v2.5";
 }
 
 function promptForVersion(version: CompilerPromptVersion): {
@@ -117,7 +130,10 @@ function promptForVersion(version: CompilerPromptVersion): {
   if (version === "v2.3") {
     return { system: COMPILER_PROMPT_V2_3, promptVersion: PROMPT_VERSION_V2_3 };
   }
-  return { system: COMPILER_PROMPT_V2_4, promptVersion: PROMPT_VERSION_V2_4 };
+  if (version === "v2.4") {
+    return { system: COMPILER_PROMPT_V2_4, promptVersion: PROMPT_VERSION_V2_4 };
+  }
+  return { system: COMPILER_PROMPT_V2_5, promptVersion: PROMPT_VERSION_V2_5 };
 }
 
 export async function compileManifest(
@@ -277,7 +293,9 @@ export async function compileManifest(
         options?.onAttempt?.(attemptInfo);
         const speakable = applySpeakableOutputNormalization(result.data);
         logSpeakableOutputChanges(speakable.changes);
-        return speakable.manifest;
+        const qa = runScriptQa(speakable.manifest);
+        logScriptQaFindings(qa.findings);
+        return qa.manifest;
       }
     } else {
       lastErrors = result.errors;
@@ -305,7 +323,7 @@ export async function compileManifest(
   );
 }
 
-export const PROMPT_VERSION = PROMPT_VERSION_V2_4;
+export const PROMPT_VERSION = PROMPT_VERSION_V2_5;
 export {
   PROMPT_VERSION_V1_4,
   PROMPT_VERSION_V2,
@@ -313,4 +331,5 @@ export {
   PROMPT_VERSION_V2_2,
   PROMPT_VERSION_V2_3,
   PROMPT_VERSION_V2_4,
+  PROMPT_VERSION_V2_5,
 };

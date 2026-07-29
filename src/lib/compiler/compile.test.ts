@@ -6,7 +6,7 @@ import {
   formatCompilerFailureMessage,
   PROMPT_VERSION,
 } from "./compile";
-import { COMPILER_PROMPT_V2_4 } from "./prompt.v2.4";
+import { COMPILER_PROMPT_V2_5 } from "./prompt.v2.5";
 import type { CompilerInput } from "../session/derive";
 import { DEFAULT_ENTRAINMENT_PLAN } from "../session/derive";
 
@@ -163,11 +163,11 @@ describe("compileManifest", () => {
     vi.unstubAllEnvs();
   });
 
-  it("defaults to prompt v2.4", () => {
-    expect(PROMPT_VERSION).toBe("v2.4");
+  it("defaults to prompt v2.5", () => {
+    expect(PROMPT_VERSION).toBe("v2.5");
   });
 
-  it("sends the v2.4 system prompt and skeleton in the user message", async () => {
+  it("sends the v2.5 system prompt and skeleton in the user message", async () => {
     const create = vi.fn().mockResolvedValue({
       stop_reason: "end_turn",
       usage: { input_tokens: 1, output_tokens: 1 },
@@ -182,7 +182,7 @@ describe("compileManifest", () => {
       system: string;
       messages: [{ content: string }];
     };
-    expect(firstCall.system).toBe(COMPILER_PROMPT_V2_4);
+    expect(firstCall.system).toBe(COMPILER_PROMPT_V2_5);
     const user = JSON.parse(firstCall.messages[0]!.content) as {
       skeleton: {
         length_min: number;
@@ -292,6 +292,34 @@ describe("compileManifest", () => {
     expect(create.mock.calls[1]![0].messages[0].content).toContain("LENGTH UNDERFILL");
     expect(create.mock.calls[2]![0].messages[0].content).toContain("LENGTH UNDERFILL");
     expect(manifest.segments.some((s) => s.phase === "theta")).toBe(true);
+  });
+
+  it("runs script-qa before return so person-agreement errors are fixed pre-synthesis", async () => {
+    const input = buildCompilerInput(15);
+    const draft = modelOwnedManifestDraft(input) as {
+      meta: Record<string, unknown>;
+      segments: Array<Record<string, unknown>>;
+    };
+    const theta = draft.segments.find((s) => s.phase === "theta");
+    if (theta && typeof theta.text === "string") {
+      theta.text = `You are inside my Hamilton Heights apartment. ${theta.text}`;
+    }
+    const create = vi.fn().mockResolvedValue({
+      stop_reason: "end_turn",
+      usage: { input_tokens: 10, output_tokens: 100 },
+      content: [{ type: "text", text: JSON.stringify(draft) }],
+    });
+
+    const manifest = await compileManifest(input, {
+      client: { messages: { create } } as never,
+    });
+
+    const thetaText = manifest.segments
+      .filter((s) => s.phase === "theta")
+      .map((s) => s.text)
+      .join(" ");
+    expect(thetaText).toContain("your Hamilton Heights apartment");
+    expect(thetaText).not.toMatch(/\bmy Hamilton Heights\b/);
   });
 
   it("populates rawResponse on final CompilerError", async () => {
