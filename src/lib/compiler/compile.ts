@@ -19,6 +19,10 @@ import {
   COMPILER_PROMPT_V2_2,
   PROMPT_VERSION as PROMPT_VERSION_V2_2,
 } from "../compiler/prompt.v2.2";
+import {
+  COMPILER_PROMPT_V2_3,
+  PROMPT_VERSION as PROMPT_VERSION_V2_3,
+} from "../compiler/prompt.v2.3";
 import { stripCodeFences } from "../compiler/strip-fences";
 import {
   estimateManifestWallClockSec,
@@ -71,9 +75,9 @@ function logCompileAttempt(
   );
 }
 
-export type CompilerPromptVersion = "v1.4" | "v2.0" | "v2.1" | "v2.2";
+export type CompilerPromptVersion = "v1.4" | "v2.0" | "v2.1" | "v2.2" | "v2.3";
 
-/** Default v2.2; set COMPILER_PROMPT_VERSION to pin an older prompt. */
+/** Default v2.3; set COMPILER_PROMPT_VERSION to pin an older prompt. */
 export function resolveCompilerPromptVersion(
   override?: CompilerPromptVersion,
 ): CompilerPromptVersion {
@@ -82,7 +86,8 @@ export function resolveCompilerPromptVersion(
   if (env === "v1.4") return "v1.4";
   if (env === "v2.0") return "v2.0";
   if (env === "v2.1") return "v2.1";
-  return "v2.2";
+  if (env === "v2.2") return "v2.2";
+  return "v2.3";
 }
 
 function promptForVersion(version: CompilerPromptVersion): {
@@ -98,7 +103,10 @@ function promptForVersion(version: CompilerPromptVersion): {
   if (version === "v2.1") {
     return { system: COMPILER_PROMPT_V2_1, promptVersion: PROMPT_VERSION_V2_1 };
   }
-  return { system: COMPILER_PROMPT_V2_2, promptVersion: PROMPT_VERSION_V2_2 };
+  if (version === "v2.2") {
+    return { system: COMPILER_PROMPT_V2_2, promptVersion: PROMPT_VERSION_V2_2 };
+  }
+  return { system: COMPILER_PROMPT_V2_3, promptVersion: PROMPT_VERSION_V2_3 };
 }
 
 export async function compileManifest(
@@ -252,5 +260,11 @@ export async function compileManifest(
   );
 }
 
-export const PROMPT_VERSION = PROMPT_VERSION_V2_2;
-export { PROMPT_VERSION_V1_4, PROMPT_VERSION_V2, PROMPT_VERSION_V2_1, PROMPT_VERSION_V2_2 };
+export const PROMPT_VERSION = PROMPT_VERSION_V2_3;
+export {
+  PROMPT_VERSION_V1_4,
+  PROMPT_VERSION_V2,
+  PROMPT_VERSION_V2_1,
+  PROMPT_VERSION_V2_2,
+  PROMPT_VERSION_V2_3,
+};

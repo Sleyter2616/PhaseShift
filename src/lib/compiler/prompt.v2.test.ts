@@ -71,7 +71,7 @@ describe("prompt.v2.0", () => {
     expect(thetaSteps[0]?.target_sec).toBe(skeleton.theta_steps[0]?.target_sec);
     expect(thetaSteps[0]?.target_words).toBe(skeleton.theta_steps[0]?.target_words);
     const sequences = formatted.counted_sequences as Record<string, string>;
-    expect(sequences.alpha_breath).toContain("breath");
+    expect(sequences).not.toHaveProperty("alpha_breath");
     expect(sequences.alpha_countdown).toContain("countdown");
   });
 });

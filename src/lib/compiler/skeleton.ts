@@ -354,14 +354,19 @@ export function distributeThetaTime(theta_sec: number, steps: number[]): ThetaSt
   }));
 }
 
-/** Fixed breath ratio: inhale 4s / hold 2s / exhale 8s / pause 2s (per cycle). */
+/**
+ * Self-paced breath guidance ratio (stated once in alpha content — not
+ * live-cued). inhale ~4 / soft hold ~2 / exhale ~8.
+ */
 export const BREATH_INHALE_SEC = 4;
 export const BREATH_HOLD_SEC = 2;
 export const BREATH_EXHALE_SEC = 8;
+/** @deprecated Rest slot from former live-cued cycle; kept for ratio docs/tests. */
 export const BREATH_PAUSE_SEC = 2;
 export const BREATH_CYCLE_SEC =
   BREATH_INHALE_SEC + BREATH_HOLD_SEC + BREATH_EXHALE_SEC + BREATH_PAUSE_SEC;
 
+/** Spoken cues for gamma energizing_breath micros (alpha no longer live-cues). */
 export const BREATH_CUES = {
   inhale: "Breathe in.",
   hold: "Hold.",
@@ -372,7 +377,9 @@ export const BREATH_CUES = {
  * Server-owned counted-sequence timing with enforced break intervals so
  * pacing cannot be compressed by the model.
  *
- * Breath uses a fixed 4/2/8/2 cycle; cycle count is fit into totalSec.
+ * Alpha breath is NOT spliced (self-paced instruction in model content).
+ * `breath` kind remains for tests / legacy builders; production skeleton
+ * uses countdown + gamma sequences only.
  */
 export function buildCountedSequence(
   kind: CountedSequenceKind,
@@ -473,7 +480,7 @@ export type SessionSkeleton = {
   theta_steps: ThetaStepTiming[];
   depth: DepthCalibration;
   counted_sequences: {
-    alpha_breath: CountedSequence;
+    /** Server-led numbers-only countdown; breath is model-instructed self-pace. */
     alpha_countdown: CountedSequence;
     gamma_energizing: CountedSequence;
     gamma_countup: CountedSequence;
@@ -503,11 +510,11 @@ export function buildSessionSkeleton(input: {
   const theta_steps = distributeThetaTime(phase_budget.theta_sec, steps);
   const depth = buildDepthCalibration(length_min, steps.length);
 
-  const alphaBreathSec = Math.max(BREATH_CYCLE_SEC, Math.floor(phase_budget.alpha_sec * 0.45));
+  // Countdown stays server-led (~25% of alpha). Breath is no longer spliced —
+  // the model fills the remaining alpha budget with self-paced instruction + flow.
   const alphaCountdownSec = Math.max(20, Math.floor(phase_budget.alpha_sec * 0.25));
   const gammaEnergizingSec = Math.max(30, Math.floor(phase_budget.gamma_sec * 0.5));
   const gammaCountupSec = Math.max(15, Math.floor(phase_budget.gamma_sec * 0.25));
-  const alphaBreathCycles = Math.max(1, Math.floor(alphaBreathSec / BREATH_CYCLE_SEC));
 
   return {
     length_min,
@@ -517,7 +524,6 @@ export function buildSessionSkeleton(input: {
     theta_steps,
     depth,
     counted_sequences: {
-      alpha_breath: buildCountedSequence("breath", alphaBreathCycles, alphaBreathSec),
       alpha_countdown: buildCountedSequence("countdown", 10, alphaCountdownSec),
       gamma_energizing: buildCountedSequence("energizing_breath", 3, gammaEnergizingSec),
       gamma_countup: buildCountedSequence("countup", 5, gammaCountupSec),

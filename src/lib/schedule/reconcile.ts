@@ -3,7 +3,7 @@ export type PhaseKey = (typeof PHASES)[number];
 
 /**
  * Hard cap for beta/alpha/gamma (and for theta *intended* pauses before
- * length-dwelling fill). Breath 4/2/8/2 needs up to 10s.
+ * length-dwelling fill). Counted-sequence silence (countdown gaps) needs up to 10s.
  */
 export const MAX_SCHEDULED_PAUSE_MS = 10_000;
 

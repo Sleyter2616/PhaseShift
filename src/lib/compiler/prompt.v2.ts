@@ -201,7 +201,6 @@ export function formatSkeletonForPrompt(skeleton: SessionSkeleton): Record<strin
       target_words: timing.target_words,
     })),
     counted_sequences: {
-      alpha_breath: formatCountedSequenceForPrompt(skeleton.counted_sequences.alpha_breath),
       alpha_countdown: formatCountedSequenceForPrompt(
         skeleton.counted_sequences.alpha_countdown,
       ),
