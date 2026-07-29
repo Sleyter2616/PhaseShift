@@ -9,6 +9,14 @@ import type { PlaybackManifest } from "@/lib/playback/manifest";
 import { EntrainmentEngine, type EntrainmentMode } from "@/lib/audio/engine";
 import { JitDecodeWindow } from "@/lib/audio/decode-window";
 import {
+  TONE_GAIN_DEFAULT,
+  TONE_GAIN_MAX,
+  TONE_GAIN_MIN,
+  VOICE_GAIN_DEFAULT,
+  VOICE_GAIN_MAX,
+  VOICE_GAIN_MIN,
+} from "@/lib/audio/mix";
+import {
   buildSeekPlan,
   clampSeekTarget,
   computeSegmentSchedule,
@@ -172,8 +180,8 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
 
   const [stage, setStage] = useState<PlayerStage>("prebegin");
   const [mode, setMode] = useState<EntrainmentMode>(manifest.meta.entrainment_mode);
-  const [voiceGain, setVoiceGain] = useState(1);
-  const [toneGain, setToneGain] = useState(0.12);
+  const [voiceGain, setVoiceGain] = useState(VOICE_GAIN_DEFAULT);
+  const [toneGain, setToneGain] = useState(TONE_GAIN_DEFAULT);
   const [fetchProgress, setFetchProgress] = useState({ loaded: 0, total: 0 });
   const [elapsedSec, setElapsedSec] = useState(0);
   const [currentPhase, setCurrentPhase] = useState<string | null>(null);
@@ -667,8 +675,9 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
   }, []);
 
   const handleToneGain = useCallback((value: number) => {
-    setToneGain(value);
-    engineRef.current?.setToneGain(value);
+    const clamped = Math.min(TONE_GAIN_MAX, Math.max(TONE_GAIN_MIN, value));
+    setToneGain(clamped);
+    engineRef.current?.setToneGain(clamped);
   }, []);
 
   const submitRating = useCallback(async () => {
@@ -927,8 +936,8 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
                 <span className="mb-2 block">Voice volume</span>
                 <input
                   type="range"
-                  min={0}
-                  max={1}
+                  min={VOICE_GAIN_MIN}
+                  max={VOICE_GAIN_MAX}
                   step={0.01}
                   value={voiceGain}
                   onChange={(event) => handleVoiceGain(Number(event.target.value))}
@@ -938,16 +947,19 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
               </label>
 
               <label className="block">
-                <span className="mb-2 block">Tone volume</span>
+                <span className="mb-2 flex items-baseline justify-between gap-2">
+                  <span>Tone volume</span>
+                  <span className="text-xs text-[var(--session-mid)]">subtle bed under voice</span>
+                </span>
                 <input
                   type="range"
-                  min={0}
-                  max={0.5}
+                  min={TONE_GAIN_MIN}
+                  max={TONE_GAIN_MAX}
                   step={0.01}
-                  value={toneGain}
+                  value={Math.min(toneGain, TONE_GAIN_MAX)}
                   onChange={(event) => handleToneGain(Number(event.target.value))}
                   className="session-scrub w-full"
-                  aria-label="Tone volume"
+                  aria-label="Tone volume, subtle bed under voice"
                 />
               </label>
 
