@@ -85,8 +85,15 @@ export const DECODE_LEAD_TICKS = 1;
 export interface ScheduledVoiceEvent {
   seq: number;
   atCtxTime: number;
+  /** When catching up a late start, offset into the buffer (seconds). */
+  offsetSec?: number;
 }
 
+/**
+ * Voices whose nominal start falls in [ctxNow, ctxNow+LOOKAHEAD], plus
+ * late catch-up for any unscheduled voice that should still be audible
+ * (nominal start in the past but voice end still ahead of ctxNow).
+ */
 export function voicesDueInWindow(
   schedule: ReadonlyArray<SegmentSchedule>,
   sessionStartCtxTime: number,
@@ -98,9 +105,23 @@ export function voicesDueInWindow(
 
   for (const entry of schedule) {
     if (alreadyScheduled.has(entry.seq)) continue;
-    const atCtxTime = sessionStartCtxTime + entry.startSec;
-    if (atCtxTime >= ctxNow && atCtxTime <= windowEnd) {
-      events.push({ seq: entry.seq, atCtxTime });
+    const nominalStart = sessionStartCtxTime + entry.startSec;
+    const voiceEnd = nominalStart + entry.voiceDurationSec;
+
+    if (nominalStart >= ctxNow && nominalStart <= windowEnd) {
+      events.push({ seq: entry.seq, atCtxTime: nominalStart });
+      continue;
+    }
+
+    // Late catch-up: JIT decode (or a stalled tick) missed the nominal start,
+    // but the segment's voice window is still open — schedule now with offset
+    // so content stays aligned to session elapsed (same pattern as seek).
+    if (nominalStart < ctxNow && voiceEnd > ctxNow) {
+      events.push({
+        seq: entry.seq,
+        atCtxTime: ctxNow,
+        offsetSec: Math.max(0, ctxNow - nominalStart),
+      });
     }
   }
 

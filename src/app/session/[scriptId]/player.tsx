@@ -369,7 +369,11 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
           void ensureDecoded(voice.seq);
           continue;
         }
-        const source = engine.scheduleVoice(buffer, voice.atCtxTime);
+        const source = engine.scheduleVoice(
+          buffer,
+          voice.atCtxTime,
+          voice.offsetSec ?? 0,
+        );
         scheduledVoicesRef.current.add(voice.seq);
         source.onended = () => {
           decodeWindowRef.current.markPlayed(voice.seq);
@@ -589,6 +593,14 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
       (window as Window & { __psEngine?: EntrainmentEngine }).__psEngine = engine;
     }
     void requestWakeLock();
+
+    // Warm-decode the first voice before arming the session clock so t=0
+    // is not lost to the JIT race (decode finishes after nominal start).
+    const firstSeq = schedule[0]?.seq;
+    if (!isTestGeneration && firstSeq != null) {
+      await ensureDecoded(firstSeq);
+    }
+
     engine.startBed(initialBeatHz);
     sessionStartCtxTimeRef.current = engine.audioContext.currentTime;
     setStage("playing");
@@ -598,10 +610,13 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
     runSchedulerTick();
   }, [
     disposeEngine,
+    ensureDecoded,
     initialBeatHz,
+    isTestGeneration,
     mode,
     requestWakeLock,
     runSchedulerTick,
+    schedule,
     toneGain,
     updateDebugSnapshot,
     voiceGain,

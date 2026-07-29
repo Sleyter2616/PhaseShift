@@ -20,29 +20,48 @@ const COUNT_WORDS: Record<number, string> = {
   10: "Ten.",
 };
 
-function cueForBeat(beat: CountedBeat): string {
+/** Spoken cue for a beat. Pause beats have no cue (pure silence). */
+export function spokenCueForBeat(beat: CountedBeat): string | null {
+  if (beat.kind === "pause") return null;
   if (beat.kind === "count") {
     return COUNT_WORDS[beat.n] ?? `${beat.n}.`;
   }
   if (beat.kind === "inhale") return BREATH_CUES.inhale;
   if (beat.kind === "hold") return BREATH_CUES.hold;
   if (beat.kind === "exhale") return BREATH_CUES.exhale;
-  return BREATH_CUES.pause;
+  return null;
 }
 
 /**
  * Expand a counted sequence into micro-segments paced by pause_after_ms
  * (real silence), not inline <break> tags.
+ *
+ * Pause beats are NOT spoken — their duration is folded into the previous
+ * spoken beat's pause_after_ms so silence is pure (no "Rest." / pause labels).
+ * Count beats speak only the number.
  */
 export function expandCountedSequenceToMicroSegments(
   sequence: CountedSequence,
   phase: "alpha" | "gamma",
   pacing_wpm: number,
 ): ManifestSegment[] {
-  return sequence.beats.map((beat, index) => {
-    const pause_after_ms = beat.sec * 1000;
-    return {
-      seq: index + 1, // renumbered by caller
+  const segments: ManifestSegment[] = [];
+
+  for (const beat of sequence.beats) {
+    if (beat.kind === "pause") {
+      const prev = segments.at(-1);
+      if (prev) {
+        prev.pause_after_ms += beat.sec * 1000;
+        prev.target_duration_sec += beat.sec;
+      }
+      continue;
+    }
+
+    const text = spokenCueForBeat(beat);
+    if (text == null) continue;
+
+    segments.push({
+      seq: segments.length + 1, // renumbered by caller
       phase,
       step: null,
       title: `counted:${sequence.kind}:${beat.kind}`,
@@ -52,10 +71,12 @@ export function expandCountedSequenceToMicroSegments(
       pacing_wpm,
       // Budget slot equals the silent beat; cue speech is short and rides inside it.
       target_duration_sec: beat.sec,
-      pause_after_ms,
-      text: cueForBeat(beat),
-    };
-  });
+      pause_after_ms: beat.sec * 1000,
+      text,
+    });
+  }
+
+  return segments;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

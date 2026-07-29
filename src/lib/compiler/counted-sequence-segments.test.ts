@@ -2,31 +2,65 @@ import { describe, expect, it } from "vitest";
 import { buildCountedSequence, buildSessionSkeleton } from "./skeleton";
 import {
   expandCountedSequenceToMicroSegments,
+  spokenCueForBeat,
   spliceCountedSequenceSegments,
 } from "./counted-sequence-segments";
 import { reconcilePhaseTiming, MAX_SCHEDULED_PAUSE_MS } from "../schedule/reconcile";
 import type { CompilerInput } from "../session/derive";
 import { DEFAULT_ENTRAINMENT_PLAN } from "../session/derive";
 
+const PAUSE_LABEL_RE = /\b(rest|pause)\b/i;
+
 describe("expandCountedSequenceToMicroSegments", () => {
-  it("produces breath micro-segments with 4000/2000/8000/2000 pause_after_ms", () => {
+  it("produces breath micro-segments with 4/2/8 silence and folded rest (no Rest. cue)", () => {
     const seq = buildCountedSequence("breath", 2, 40);
     expect(seq.count).toBe(2);
     const micros = expandCountedSequenceToMicroSegments(seq, "alpha", 90);
-    expect(micros).toHaveLength(8);
-    const pauses = micros.map((m) => m.pause_after_ms);
-    expect(pauses.slice(0, 4)).toEqual([4000, 2000, 8000, 2000]);
-    expect(pauses.slice(4, 8)).toEqual([4000, 2000, 8000, 2000]);
+    // Pause beats are folded — 3 spoken cues per cycle, not 4.
+    expect(micros).toHaveLength(6);
     expect(micros.map((m) => m.text)).toEqual([
       "Breathe in.",
       "Hold.",
       "Breathe out.",
-      "Rest.",
       "Breathe in.",
       "Hold.",
       "Breathe out.",
-      "Rest.",
     ]);
+    // inhale 4s, hold 2s, exhale 8s + folded rest 2s
+    expect(micros.map((m) => m.pause_after_ms).slice(0, 3)).toEqual([4000, 2000, 10_000]);
+    expect(micros.every((m) => !PAUSE_LABEL_RE.test(m.text))).toBe(true);
+  });
+
+  it("countdown speaks only numbers — no rest/pause labels", () => {
+    const seq = buildCountedSequence("countdown", 10, 40);
+    const micros = expandCountedSequenceToMicroSegments(seq, "alpha", 90);
+    expect(micros).toHaveLength(10);
+    expect(micros.map((m) => m.text)).toEqual([
+      "Ten.",
+      "Nine.",
+      "Eight.",
+      "Seven.",
+      "Six.",
+      "Five.",
+      "Four.",
+      "Three.",
+      "Two.",
+      "One.",
+    ]);
+    expect(micros.every((m) => !PAUSE_LABEL_RE.test(m.text))).toBe(true);
+    // Inter-count 1s pause folded into each prior count (last has no trailing pause).
+    for (let i = 0; i < micros.length - 1; i += 1) {
+      const spokenSlotMs = seq.beats.filter((b) => b.kind === "count")[i]!.sec * 1000;
+      expect(micros[i]!.pause_after_ms).toBe(spokenSlotMs + 1000);
+    }
+    const lastSpokenMs = seq.beats.filter((b) => b.kind === "count").at(-1)!.sec * 1000;
+    expect(micros.at(-1)!.pause_after_ms).toBe(lastSpokenMs);
+  });
+
+  it("spokenCueForBeat returns null for pause beats", () => {
+    expect(spokenCueForBeat({ kind: "pause", sec: 2 })).toBeNull();
+    expect(spokenCueForBeat({ kind: "count", n: 7, sec: 2 })).toBe("Seven.");
+    expect(spokenCueForBeat({ kind: "inhale", sec: 4 })).toBe("Breathe in.");
   });
 });
 
@@ -44,6 +78,18 @@ describe("timing regression acceptance", () => {
     for (const segment of result.segments) {
       expect(segment.scheduled_pause_after_ms).toBeLessThanOrEqual(MAX_SCHEDULED_PAUSE_MS);
     }
+  });
+
+  it("allows intentional breath exhale+rest pause up to the cap", () => {
+    const result = reconcilePhaseTiming({
+      phaseBudgetSec: { beta: 0, alpha: 360, theta: 1980, gamma: 240 },
+      segments: [
+        { phase: "alpha", pause_after_ms: 4000, actual_duration_sec: 0.5 },
+        { phase: "alpha", pause_after_ms: 2000, actual_duration_sec: 0.4 },
+        { phase: "alpha", pause_after_ms: 10_000, actual_duration_sec: 0.5 },
+      ],
+    });
+    expect(result.segments[2]?.scheduled_pause_after_ms).toBe(10_000);
   });
 
   it("session wall-clock stays near length without multi-minute dead air", () => {
@@ -120,11 +166,21 @@ describe("timing regression acceptance", () => {
     };
 
     const { manifest } = spliceCountedSequenceSegments(draft, input);
-    const segments = (manifest as { segments: Array<{
-      phase: "beta" | "alpha" | "theta" | "gamma";
-      pause_after_ms: number;
-      target_duration_sec: number;
-    }> }).segments;
+    const segments = (
+      manifest as {
+        segments: Array<{
+          phase: "beta" | "alpha" | "theta" | "gamma";
+          pause_after_ms: number;
+          target_duration_sec: number;
+          text: string;
+        }>;
+      }
+    ).segments;
+
+    const countedTexts = segments
+      .filter((s) => s.text.startsWith("Breathe") || s.text === "Hold." || /^\w+\.$/.test(s.text))
+      .map((s) => s.text);
+    expect(countedTexts.every((t) => !PAUSE_LABEL_RE.test(t))).toBe(true);
 
     // Simulate TTS: voiced ≈ 40% of target (cue/speech), silence from pause_after_ms.
     const forReconcile = segments.map((s) => ({

@@ -111,7 +111,7 @@ export function checkPhaseTimingClosure(
 
 export function findLongScheduledPauses(
   segments: ReadonlyArray<{ seq: number; scheduled_pause_after_ms: number | null }>,
-  thresholdMs = 5_000,
+  thresholdMs = 10_000,
 ): Array<{ seq: number; ms: number }> {
   return segments
     .filter((segment) => (segment.scheduled_pause_after_ms ?? 0) > thresholdMs)
