@@ -83,8 +83,13 @@ describe("refund minutes helpers", () => {
       rpc,
     } as unknown as ServiceClient;
 
-    await refundMinutesForFailedScript(supabase, "user-1", "script-1");
+    const result = await refundMinutesForFailedScript(supabase, "user-1", "script-1");
     expect(rpc).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      alreadyRefunded: true,
+      minutesRefunded: 0,
+      breakdown: { subscriptionSpent: 0, topupSpent: 0 },
+    });
   });
 
   it("refundMinutesForFailedScript reconstructs spend pools from ledger", async () => {
@@ -122,7 +127,9 @@ describe("refund minutes helpers", () => {
       },
     } as unknown as ServiceClient;
 
-    await refundMinutesForFailedScript(supabase, "user-1", "script-1");
+    const result = await refundMinutesForFailedScript(supabase, "user-1", "script-1");
+    expect(result.minutesRefunded).toBe(80);
+    expect(result.alreadyRefunded).toBe(false);
     expect(rpcCalls).toEqual([
       {
         name: "refund_minutes",

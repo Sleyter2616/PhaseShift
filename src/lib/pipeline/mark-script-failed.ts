@@ -1,8 +1,14 @@
 import { getServiceClient } from "@/lib/db/service-client";
-import { refundMinutesForFailedScript } from "@/lib/billing/refund-minutes";
+import {
+  refundMinutesForFailedScript,
+  type RefundMinutesResult,
+} from "@/lib/billing/refund-minutes";
 import { capturePathError } from "@/lib/sentry/capture";
 
-export async function markScriptFailed(scriptId: string, message: string): Promise<void> {
+export async function markScriptFailed(
+  scriptId: string,
+  message: string,
+): Promise<RefundMinutesResult | null> {
   const supabase = getServiceClient();
   const errorMessage = message.slice(0, 4000);
 
@@ -12,9 +18,10 @@ export async function markScriptFailed(scriptId: string, message: string): Promi
     .eq("id", scriptId)
     .maybeSingle();
 
+  let refund: RefundMinutesResult | null = null;
   if (script?.user_id) {
     try {
-      await refundMinutesForFailedScript(supabase, script.user_id, scriptId);
+      refund = await refundMinutesForFailedScript(supabase, script.user_id, scriptId);
     } catch (refundError) {
       capturePathError(refundError, "pipeline.mark_script_failed.refund");
       console.error("minutes refund on script failure failed", {
@@ -34,4 +41,6 @@ export async function markScriptFailed(scriptId: string, message: string): Promi
     .update({ synthesis_status: "failed" })
     .eq("script_id", scriptId)
     .neq("synthesis_status", "ready");
+
+  return refund;
 }

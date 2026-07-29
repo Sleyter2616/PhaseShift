@@ -43,12 +43,20 @@ export async function refundMinutesBreakdown(
   }
 }
 
+export type RefundMinutesResult = {
+  alreadyRefunded: boolean;
+  minutesRefunded: number;
+  breakdown: SpendBreakdown;
+};
+
 /** Idempotent refund from minutes_ledger spend rows for a script. */
 export async function refundMinutesForFailedScript(
   supabase: ServiceClient,
   userId: string,
   scriptId: string,
-): Promise<void> {
+): Promise<RefundMinutesResult> {
+  const empty: SpendBreakdown = { subscriptionSpent: 0, topupSpent: 0 };
+
   const { data: existingRefund, error: refundLookupError } = await supabase
     .from("minutes_ledger")
     .select("id")
@@ -57,7 +65,9 @@ export async function refundMinutesForFailedScript(
     .limit(1);
 
   if (refundLookupError) throw new Error(refundLookupError.message);
-  if (existingRefund && existingRefund.length > 0) return;
+  if (existingRefund && existingRefund.length > 0) {
+    return { alreadyRefunded: true, minutesRefunded: 0, breakdown: empty };
+  }
 
   const { data: spendRows, error: spendLookupError } = await supabase
     .from("minutes_ledger")
@@ -75,8 +85,13 @@ export async function refundMinutesForFailedScript(
     if (row.pool === "topup") breakdown.topupSpent += minutes;
   }
 
-  if (breakdown.subscriptionSpent === 0 && breakdown.topupSpent === 0) return;
+  const minutesRefunded = breakdown.subscriptionSpent + breakdown.topupSpent;
+  if (minutesRefunded === 0) {
+    return { alreadyRefunded: false, minutesRefunded: 0, breakdown };
+  }
+
   await refundMinutesBreakdown(supabase, userId, scriptId, breakdown);
+  return { alreadyRefunded: false, minutesRefunded, breakdown };
 }
 
 export function isInsufficientMinutesError(error: { message?: string }): boolean {
