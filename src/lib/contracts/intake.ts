@@ -171,7 +171,7 @@ const lengthMinSchema = z
     z.literal(30),
     z.literal(45),
   ])
-  .default(45);
+  .default(30);
 
 const sessionPrefsSchema = z
   .object({
@@ -253,7 +253,7 @@ export const intakeSchema = z.object({
     .min(1, "sync_actions must have 1-5 items")
     .max(5, "sync_actions must have 1-5 items"),
   session: sessionPrefsSchema.default({
-    duration_min: 45,
+    duration_min: 30,
     middle_start: 2,
     middle_count: 10,
     posture: "sitting",

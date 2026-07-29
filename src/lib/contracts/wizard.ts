@@ -1,8 +1,14 @@
 import {
+  selectableMiddleCount,
+  type SessionLengthMin,
+} from "../compiler/skeleton";
+import {
   intakeSchema,
   WIZARD_STEP_SCHEMAS,
   type Intake,
 } from "./intake";
+
+export type WizardLengthMin = SessionLengthMin;
 
 export interface WizardDraft {
   goal_statement: string;
@@ -13,7 +19,7 @@ export interface WizardDraft {
   features: string[];
   sync_actions: { action: string; deadline?: string }[];
   session: {
-    duration_min: 45;
+    duration_min: WizardLengthMin;
     middle_start: number;
     middle_count: number;
     posture: "sitting" | "lying";
@@ -26,6 +32,21 @@ export interface WizardDraft {
   stock_voice_id: string | null;
 }
 
+/** Default length: complete full-arc baseline (v0.5-2a). */
+export const DEFAULT_WIZARD_LENGTH_MIN: WizardLengthMin = 30;
+
+export function withSessionLength(
+  session: WizardDraft["session"],
+  lengthMin: WizardLengthMin,
+): WizardDraft["session"] {
+  return {
+    ...session,
+    duration_min: lengthMin,
+    middle_start: 2,
+    middle_count: selectableMiddleCount(lengthMin),
+  };
+}
+
 export const EMPTY_WIZARD_DRAFT: WizardDraft = {
   goal_statement: "",
   localization: { timeframe: "90d", place: "" },
@@ -35,9 +56,9 @@ export const EMPTY_WIZARD_DRAFT: WizardDraft = {
   features: [],
   sync_actions: [{ action: "" }],
   session: {
-    duration_min: 45,
+    duration_min: DEFAULT_WIZARD_LENGTH_MIN,
     middle_start: 2,
-    middle_count: 10,
+    middle_count: selectableMiddleCount(DEFAULT_WIZARD_LENGTH_MIN),
     posture: "sitting",
     entrainment_mode: "isochronic",
     senses_emphasis: ["sight", "touch"],
@@ -78,6 +99,7 @@ export function validateWizardStep(step: number, draft: WizardDraft): string | n
 }
 
 export function draftToIntake(draft: WizardDraft): Intake {
+  const lengthMin = draft.session.duration_min;
   return intakeSchema.parse({
     goal_statement: draft.goal_statement,
     localization: draft.localization,
@@ -88,9 +110,9 @@ export function draftToIntake(draft: WizardDraft): Intake {
     sync_actions: draft.sync_actions.filter((item) => item.action.trim().length > 0),
     session: {
       ...draft.session,
-      duration_min: 45,
-      middle_start: 2,
-      middle_count: 10,
+      duration_min: lengthMin,
+      middle_start: draft.session.middle_start ?? 2,
+      middle_count: selectableMiddleCount(lengthMin),
       posture: draft.session.posture ?? "sitting",
     },
   });

@@ -104,7 +104,7 @@ export default async function ScriptsPage() {
                       <span className="text-[var(--text-mid)]">{formatDate(script.created_at)}</span>
                     </p>
                   </div>
-                  <div className="shrink-0">
+                  <div className="flex shrink-0 flex-wrap items-center gap-2">
                     {script.status === "ready" ? (
                       <Link href={`/session/${script.id}`} className="btn-clay px-4 py-1.5 text-sm">
                         Play
@@ -117,6 +117,12 @@ export default async function ScriptsPage() {
                         Status
                       </Link>
                     )}
+                    <Link
+                      href={`/wizard?from=${script.id}`}
+                      className="btn-ghost px-4 py-1.5 text-sm"
+                    >
+                      Reuse answers
+                    </Link>
                   </div>
                 </li>
               );

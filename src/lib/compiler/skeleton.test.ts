@@ -193,9 +193,9 @@ describe("buildCountedSequence", () => {
 });
 
 describe("buildSessionSkeleton defaults", () => {
-  it("defaults to 45 / full steps / sitting", () => {
+  it("defaults to 30 / full steps / sitting", () => {
     const skeleton = buildSessionSkeleton({});
-    expect(skeleton.length_min).toBe(45);
+    expect(skeleton.length_min).toBe(30);
     expect(skeleton.steps).toHaveLength(12);
     expect(skeleton.posture).toBe("sitting");
     expect(
@@ -203,7 +203,7 @@ describe("buildSessionSkeleton defaults", () => {
         skeleton.phase_budget.alpha_sec +
         skeleton.phase_budget.theta_sec +
         skeleton.phase_budget.gamma_sec,
-    ).toBe(2700);
+    ).toBe(1800);
   });
 });
 

@@ -40,9 +40,9 @@ describe("minutes billing model", () => {
 
   it("computes minutesCost with stock=1 and own_voice=2", () => {
     expect(VOICE_MULTIPLIER).toEqual({ stock: 1, own_voice: 2 });
-    expect(SESSION_LENGTH_MINUTES).toBe(45);
-    expect(minutesCost(SESSION_LENGTH_MINUTES, false)).toBe(45);
-    expect(minutesCost(SESSION_LENGTH_MINUTES, true)).toBe(90);
+    expect(SESSION_LENGTH_MINUTES).toBe(30);
+    expect(minutesCost(SESSION_LENGTH_MINUTES, false)).toBe(30);
+    expect(minutesCost(SESSION_LENGTH_MINUTES, true)).toBe(60);
     expect(minutesCost(10, false)).toBe(10);
     expect(minutesCost(15, false)).toBe(15);
     expect(minutesCost(45, true)).toBe(90);
