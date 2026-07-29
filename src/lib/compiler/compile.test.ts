@@ -6,7 +6,7 @@ import {
   formatCompilerFailureMessage,
   PROMPT_VERSION,
 } from "./compile";
-import { COMPILER_PROMPT_V2_1 } from "./prompt.v2.1";
+import { COMPILER_PROMPT_V2_2 } from "./prompt.v2.2";
 import type { CompilerInput } from "../session/derive";
 import { DEFAULT_ENTRAINMENT_PLAN } from "../session/derive";
 
@@ -146,11 +146,11 @@ describe("compileManifest", () => {
     vi.unstubAllEnvs();
   });
 
-  it("defaults to prompt v2.1", () => {
-    expect(PROMPT_VERSION).toBe("v2.1");
+  it("defaults to prompt v2.2", () => {
+    expect(PROMPT_VERSION).toBe("v2.2");
   });
 
-  it("sends the v2.1 system prompt and skeleton in the user message", async () => {
+  it("sends the v2.2 system prompt and skeleton in the user message", async () => {
     const create = vi.fn().mockResolvedValue({
       stop_reason: "end_turn",
       usage: { input_tokens: 1, output_tokens: 1 },
@@ -165,12 +165,19 @@ describe("compileManifest", () => {
       system: string;
       messages: [{ content: string }];
     };
-    expect(firstCall.system).toBe(COMPILER_PROMPT_V2_1);
+    expect(firstCall.system).toBe(COMPILER_PROMPT_V2_2);
     const user = JSON.parse(firstCall.messages[0]!.content) as {
-      skeleton: { length_min: number; steps: unknown[] };
+      skeleton: {
+        length_min: number;
+        steps: unknown[];
+        depth: { density_factor: number };
+        theta_steps: Array<{ target_words: number }>;
+      };
     };
     expect(user.skeleton.length_min).toBe(15);
     expect(user.skeleton.steps).toHaveLength(4);
+    expect(user.skeleton.depth.density_factor).toBe(1);
+    expect(user.skeleton.theta_steps[0]?.target_words).toBeGreaterThan(0);
   });
 
   it.each([15, 45] as const)(

@@ -1,5 +1,6 @@
 import type { CompilerInput } from "../session/derive";
 import type { ManifestSegment } from "../contracts/manifest";
+import { REFLECTIVE_PAUSE_MS } from "./skeleton";
 
 const PHASES = ["beta", "alpha", "theta", "gamma", "delta"] as const;
 type Phase = (typeof PHASES)[number];
@@ -10,6 +11,78 @@ function isPhase(value: unknown): value is Phase {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+type PauseStampable = {
+  seq: number;
+  phase: string;
+  step: number | null;
+  pause_after_ms: number;
+};
+
+function isPauseStampable(value: unknown): value is PauseStampable & Record<string, unknown> {
+  return (
+    isRecord(value) &&
+    typeof value.seq === "number" &&
+    typeof value.phase === "string" &&
+    (value.step === null || typeof value.step === "number") &&
+    typeof value.pause_after_ms === "number"
+  );
+}
+
+/**
+ * Stamp reflective pauses from skeleton.depth:
+ * - Between steps: last segment of each theta step (except final Closure)
+ * - Within steps (depth > 1): non-final segments inside a multi-segment step
+ */
+export function stampThetaReflectivePausesFromDepth(
+  segments: Array<PauseStampable & Record<string, unknown>>,
+  input: CompilerInput,
+): { segments: Array<PauseStampable & Record<string, unknown>>; actions: string[] } {
+  const actions: string[] = [];
+  const plan = input.skeleton.depth.reflective_pauses;
+  const betweenMs = plan.between_step_ms || REFLECTIVE_PAUSE_MS;
+  const withinMs = plan.within_step_ms;
+  const next = segments.map((s) => ({ ...s }));
+
+  const thetaIndices = next
+    .map((segment, index) => ({ segment, index }))
+    .filter(({ segment }) => segment.phase === "theta" && segment.step != null);
+
+  for (let i = 0; i < thetaIndices.length; i += 1) {
+    const current = thetaIndices[i]!;
+    const following = thetaIndices[i + 1];
+    const isLastOfStep =
+      !following || following.segment.step !== current.segment.step;
+    const isFinalThetaStep = !following;
+    const seg = next[current.index]!;
+
+    if (!isLastOfStep && withinMs > 0) {
+      if (seg.pause_after_ms < withinMs) {
+        actions.push(
+          `seq ${seg.seq}: stamped within-step reflective pause_after_ms ${seg.pause_after_ms}->${withinMs}`,
+        );
+        seg.pause_after_ms = withinMs;
+      }
+      continue;
+    }
+
+    if (isLastOfStep && !isFinalThetaStep && betweenMs > 0) {
+      if (seg.pause_after_ms < betweenMs) {
+        actions.push(
+          `seq ${seg.seq}: stamped between-step reflective pause_after_ms ${seg.pause_after_ms}->${betweenMs}`,
+        );
+        seg.pause_after_ms = betweenMs;
+      } else if (seg.pause_after_ms > betweenMs) {
+        actions.push(
+          `seq ${seg.seq}: capped between-step reflective pause_after_ms ${seg.pause_after_ms}->${betweenMs}`,
+        );
+        seg.pause_after_ms = betweenMs;
+      }
+    }
+  }
+
+  return { segments: next, actions };
 }
 
 /**
@@ -54,7 +127,7 @@ export function injectServerOwnedFields(
     delta: pacing.theta_wpm,
   };
 
-  const stampedSegments = segmentsIn.map((segment, index) => {
+  let stampedSegments: unknown[] = segmentsIn.map((segment, index) => {
     if (!isRecord(segment)) return segment;
 
     const next: Record<string, unknown> = { ...segment };
@@ -70,6 +143,12 @@ export function injectServerOwnedFields(
 
     return next;
   });
+
+  if (stampedSegments.every(isPauseStampable)) {
+    const paused = stampThetaReflectivePausesFromDepth(stampedSegments, input);
+    stampedSegments = paused.segments;
+    actions.push(...paused.actions);
+  }
 
   draft.segments = stampedSegments;
   actions.push(`stamped seq + pacing_wpm on ${stampedSegments.length} segment(s)`);

@@ -52,7 +52,7 @@ describe("prompt.v2.0", () => {
     expect(COMPILER_PROMPT_V2).toContain("lying:");
   });
 
-  it("formatSkeletonForPrompt exposes budgets, steps, and timings", () => {
+  it("formatSkeletonForPrompt exposes budgets, steps, depth, and word targets", () => {
     const skeleton = buildSessionSkeleton({ length_min: 15, middle_start: 4, middle_count: 2 });
     const formatted = formatSkeletonForPrompt(skeleton);
     expect(formatted.length_min).toBe(15);
@@ -61,7 +61,15 @@ describe("prompt.v2.0", () => {
       beta_sec: skeleton.phase_budget.beta_sec,
       theta_sec: skeleton.phase_budget.theta_sec,
     });
-    expect(formatted.theta_steps).toEqual(skeleton.theta_steps);
+    expect(formatted.depth).toEqual(skeleton.depth);
+    const thetaSteps = formatted.theta_steps as Array<{
+      step: number;
+      target_sec: number;
+      target_words: number;
+    }>;
+    expect(thetaSteps).toHaveLength(skeleton.theta_steps.length);
+    expect(thetaSteps[0]?.target_sec).toBe(skeleton.theta_steps[0]?.target_sec);
+    expect(thetaSteps[0]?.target_words).toBe(skeleton.theta_steps[0]?.target_words);
     const sequences = formatted.counted_sequences as Record<string, string>;
     expect(sequences.alpha_breath).toContain("breath");
     expect(sequences.alpha_countdown).toContain("countdown");

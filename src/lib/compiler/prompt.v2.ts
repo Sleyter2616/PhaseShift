@@ -193,7 +193,13 @@ export function formatSkeletonForPrompt(skeleton: SessionSkeleton): Record<strin
       theta_sec: skeleton.phase_budget.theta_sec,
       gamma_sec: skeleton.phase_budget.gamma_sec,
     },
-    theta_steps: skeleton.theta_steps,
+    depth: skeleton.depth,
+    theta_steps: skeleton.theta_steps.map((timing) => ({
+      step: timing.step,
+      name: STEP_NAMES[timing.step] ?? `Step ${timing.step}`,
+      target_sec: timing.target_sec,
+      target_words: timing.target_words,
+    })),
     counted_sequences: {
       alpha_breath: formatCountedSequenceForPrompt(skeleton.counted_sequences.alpha_breath),
       alpha_countdown: formatCountedSequenceForPrompt(

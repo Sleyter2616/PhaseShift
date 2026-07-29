@@ -15,6 +15,10 @@ import {
   COMPILER_PROMPT_V2_1,
   PROMPT_VERSION as PROMPT_VERSION_V2_1,
 } from "../compiler/prompt.v2.1";
+import {
+  COMPILER_PROMPT_V2_2,
+  PROMPT_VERSION as PROMPT_VERSION_V2_2,
+} from "../compiler/prompt.v2.2";
 import { stripCodeFences } from "../compiler/strip-fences";
 import { validateManifest, type Manifest } from "../contracts/manifest";
 import { compilerInputForModel, type CompilerInput } from "../session/derive";
@@ -59,9 +63,9 @@ function logCompileAttempt(
   );
 }
 
-export type CompilerPromptVersion = "v1.4" | "v2.0" | "v2.1";
+export type CompilerPromptVersion = "v1.4" | "v2.0" | "v2.1" | "v2.2";
 
-/** Default v2.1; set COMPILER_PROMPT_VERSION=v2.0 or v1.4 to pin an older prompt. */
+/** Default v2.2; set COMPILER_PROMPT_VERSION to pin an older prompt. */
 export function resolveCompilerPromptVersion(
   override?: CompilerPromptVersion,
 ): CompilerPromptVersion {
@@ -69,7 +73,8 @@ export function resolveCompilerPromptVersion(
   const env = process.env.COMPILER_PROMPT_VERSION?.trim();
   if (env === "v1.4") return "v1.4";
   if (env === "v2.0") return "v2.0";
-  return "v2.1";
+  if (env === "v2.1") return "v2.1";
+  return "v2.2";
 }
 
 function promptForVersion(version: CompilerPromptVersion): {
@@ -82,7 +87,10 @@ function promptForVersion(version: CompilerPromptVersion): {
   if (version === "v2.0") {
     return { system: COMPILER_PROMPT_V2, promptVersion: PROMPT_VERSION_V2 };
   }
-  return { system: COMPILER_PROMPT_V2_1, promptVersion: PROMPT_VERSION_V2_1 };
+  if (version === "v2.1") {
+    return { system: COMPILER_PROMPT_V2_1, promptVersion: PROMPT_VERSION_V2_1 };
+  }
+  return { system: COMPILER_PROMPT_V2_2, promptVersion: PROMPT_VERSION_V2_2 };
 }
 
 export async function compileManifest(
@@ -211,5 +219,5 @@ export async function compileManifest(
   );
 }
 
-export const PROMPT_VERSION = PROMPT_VERSION_V2_1;
-export { PROMPT_VERSION_V1_4, PROMPT_VERSION_V2, PROMPT_VERSION_V2_1 };
+export const PROMPT_VERSION = PROMPT_VERSION_V2_2;
+export { PROMPT_VERSION_V1_4, PROMPT_VERSION_V2, PROMPT_VERSION_V2_1, PROMPT_VERSION_V2_2 };
