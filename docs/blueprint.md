@@ -35,10 +35,14 @@ POST /api/scripts
       v
 Inngest job: generate-script
       |
-      |-- step 1: Claude call (prompt v2.0 + intake + skeleton givens; v1.4 fallback via env)
-      |-- step 2: Zod-validate manifest against skeleton steps/budgets; 1 retry with errors
-      |-- step 3: insert script_segments; hash-diff against audio_files (dedupe_key)
-      |-- step 4: fan out synthesize-segment jobs for CHANGED segments only
+      |-- step: Claude compile (prompt **v2.5** default + intake + skeleton givens;
+      |          pin older via COMPILER_PROMPT_VERSION; v1.4 fallback)
+      |-- step: Zod-validate manifest against skeleton steps/budgets; 1 retry with errors
+      |-- step: script-qa (person-agreement fix; block broken scripts pre-synth)
+      |-- step: compile-length-check — if under 97% of budget, schedule **compile-attempt-2**
+      |          as its **own** Inngest step (fail-open; never a sync re-call in attempt-1)
+      |-- step: insert script_segments; hash-diff against audio_files (dedupe_key)
+      |-- step: fan out synthesize-segment jobs for CHANGED segments only
       |             (concurrency 3-5, exponential backoff on 429)
       |                    |
       |                    v
@@ -51,12 +55,16 @@ Inngest job: generate-script
       |             - cloned/user voice path: {user_id}/{audio_file_id}.mp3
       |             - shared stock path: shared/{stock_voice_id}/{audio_file_id}.mp3
       |
-      |-- step 5: write actual_duration_sec per segment
-      |-- step 6: reconcile phase timing by scaling pause_after_ms from actuals
-      |-- step 7: mark script ready
+      |-- step: write actual_duration_sec per segment
+      |-- step: reconcile wall-clock length (theta dwelling silence → exact budget)
+      |-- step: mark script ready
+      v
+Inngest cron (every 5 min): stuck-generation-reaper
+      |  scripts stuck status=generating >10 min with 0 ready segments
+      |  → mark failed + idempotent minutes refund
       v
 Supabase Realtime -> client (progressive: playback can start once beta+alpha are ready;
-                              theta finishes synthesizing during the 8-min induction)
+                              theta finishes synthesizing during the induction)
       |
       v
 PWA client: manifest + signed URLs -> service worker caches segment bodies; refreshes URLs before expiry
@@ -133,7 +141,7 @@ export class EntrainmentEngine {
 
   constructor(private mode: 'binaural' | 'isochronic',
               private carrierHz = 200) {
-    this.toneGain.gain.value = 0.12;   // ~ -18 dB under voice
+    this.toneGain.gain.value = 0.08;   // subtle bed; capped at TONE_GAIN_MAX (0.15)
     this.voiceGain.gain.value = 1.0;
     this.toneGain.connect(this.master);
     this.voiceGain.connect(this.master);
@@ -178,7 +186,7 @@ export class EntrainmentEngine {
 
 **Scheduling.** Compute each segment's start offset from the running sum of actual_duration_sec + pause_after_ms (actuals come back from synthesis, so timing is exact, not estimated). Use a lookahead scheduler (setInterval ~200 ms, schedule 2-3 s ahead on the AudioContext clock) rather than starting an entire session's sources at once.
 
-**Defaults.** Carrier 180-220 Hz; tone bed -18 to -24 dB under voice; isochronic is the default mode with a headphones toggle for binaural (device headphone detection is unreliable, so ask, do not sniff). AudioContext must be resumed on a user gesture (iOS requirement): the Begin Session button does it.
+**Defaults.** Carrier 180-220 Hz; entrainment tone is a **subtle bed under voice** — `TONE_GAIN_DEFAULT = 0.08`, hard-capped at `TONE_GAIN_MAX = 0.15` (`src/lib/audio/mix.ts`) so the full slider stays usable without drowning speech. Isochronic is the default mode with a headphones toggle for binaural (device headphone detection is unreliable, so ask, do not sniff). AudioContext must be resumed on a user gesture (iOS requirement): the Begin Session button does it.
 
 **Offline render encoder path for v1.**
 
@@ -452,22 +460,28 @@ When `beta` budget is `0` (10-minute sessions), omit beta segments entirely and 
 
 ### 2.2 Compiler prompts (versioned, immutable)
 
-Prompts live in `src/lib/compiler/prompt.vN.ts`. **Once shipped, a version is immutable** — add `prompt.vN+1.ts` instead of editing.
+Prompts live in `src/lib/compiler/prompt.vN.ts`. **Once shipped, a version is immutable** — add `prompt.vN+1.ts` instead of editing. Default today: **v2.5** (`resolveCompilerPromptVersion` in `compile.ts`).
 
 | Version | Role |
 | ------- | ---- |
-| **v2.0** (default) | Consumes server skeleton as GIVENS: phase budgets, selected steps + per-step `target_sec`, posture, counted-sequence beat tables. Model fills text for provided slots only. |
-| **v1.4** | Legacy full-arc prompt. Retained as fallback via `COMPILER_PROMPT_VERSION=v1.4`. |
+| **v2.5** (default) | Person-aware intake embeds (`my→your` in second-person guidance) + pre-synth script-qa. |
+| **v2.4** | Hard word-budget minimums so content aims at labeled duration (underwrite gate at 97%). |
+| **v2.3** | Self-paced breath: state 4/2/8/2 **once**, then guide over the user's own pacing (no live cueing). |
+| **v2.2** | Depth-by-length calibration (full arc at 30; denser at 45). |
+| **v2.1** | Listen-pass: seamless phase transitions; no phase-name announcements. |
+| **v2.0** | Skeleton as GIVENS: phase budgets, selected steps, posture, counted-sequence tables. |
+| **v1.4** | Legacy full-arc prompt. Fallback via `COMPILER_PROMPT_VERSION=v1.4`. |
 
-Authoritative prompt text: `src/lib/compiler/prompt.v2.ts` (`COMPILER_PROMPT_V2`). Do not paste divergent copies into this blueprint.
+Authoritative text: `src/lib/compiler/prompt.v2.5.ts` (and prior immutable files). Do not paste divergent copies into this blueprint.
 
-**Structural rules (v2.0 summary):**
+**Structural rules (v2.x summary):**
 
 1. Phase order beta → alpha → theta → gamma; **skip beta when `beta_sec = 0`**.
 2. Theta contains **only** `skeleton.steps` (bookended 1 + 12), in order; ≥1 segment per listed step.
 3. Per-phase sums of `target_duration_sec` equal skeleton / `session.phase_budget_sec` exactly.
-4. Counted sequences (breaths, countdowns, energizing breaths, count-ups) use **server-provided timings verbatim** — the model must not compress them.
-5. Present tense in theta; banned modal verbs; verbatim intake placement for **present** steps; ≥20% break time in alpha/theta; WPM ceilings as soft budgets.
+4. **Self-paced breathing (v2.3+):** the session tells the 4/2/8/2 pattern once, then continues over the user's own pacing — **not** live inhale/hold/exhale cueing. Alpha countdown = **numbers only into silence** (server-spliced micro-segments). Gamma energizing breaths / count-ups remain server-timed counted sequences.
+5. Present tense in theta; banned modal verbs; person-aware verbatim intake; ≥20% break time in alpha/theta; WPM ceilings as soft budgets; hard `target_words` minimums (v2.4+).
+6. **Session content QA:** after compile, `script-qa` fixes person-agreement slips and flags broken scripts before synthesis.
 
 ### 2.3 Duration, step model, and word budgets
 
@@ -499,13 +513,17 @@ Actual per-length table (seconds; sums = `length_min × 60`):
 
 **Theta time distribution:** `distributeThetaTime` splits `theta_sec` across **selected** steps using relative weights (Visualize heaviest; same weight intent as v1), renormalized so targets sum exactly to `theta_sec`.
 
-**Posture** (`sitting` default | `lying`): does **not** change durations. Passthrough into the prompt for body-reference language, theta depth, and gamma intensity.
+**Posture** (`sitting` default | `lying`): does **not** change durations. It **does** change body-reference language in the prompt (sitting vs lying cues for orientation, theta depth, and gamma intensity).
 
-**Counted sequences:** `buildCountedSequence` returns explicit per-count timings with **enforced** inhale/hold/exhale/pause (or count/pause) beats. Alpha breath/countdown and gamma energizing/count-up timings are server-owned; the model must state them verbatim.
+**Counted sequences:** server owns timings via `buildCountedSequence` / splice helpers. Alpha **breath is not spliced** (model writes one self-paced instruction). Alpha **countdown** and gamma energizing/count-up are server-spliced micro-segments (numbers into silence / timed beats). The model must not invent competing live breath cues.
+
+**Exact session length.** Phase budgets sum to `length_min × 60` exactly. After synthesis, wall-clock length is forced to the budgeted total by **distributed theta dwelling silence** (`reconcileSessionLength` in `src/lib/schedule/reconcile.ts`) — delivered length equals labeled length within tolerance. Billing always charges the **exact budgeted** `length_min × voice_multiplier`, not measured speech time.
+
+**Fail-open compile.** Compile never hangs on underwrite: attempt-1 fail-opens; if content is under 97% of budget, **compile-attempt-2** runs as a **separate Inngest step** with its own time budget. If attempt-2 fails/times out, the pipeline keeps attempt-1 and dwelling fine-tunes length.
 
 Effective pacing (words per minute, silence included): beta 130, alpha 90, theta 105, gamma 150. Character/COGS estimates scale with length; minutes billing meters `length_min × voice_multiplier` (Section 5).
 
-**Post-synthesis duration reconciliation.** Do not trust the compiler to hit duration through word count. The source of truth is `actual_duration_sec` returned by synthesis. After every segment in a phase is synthesized:
+**Post-synthesis duration reconciliation.** Do not trust the compiler to hit duration through word count alone. The source of truth is `actual_duration_sec` plus scheduled pauses. After synthesis:
 
 ```ts
 for (const phase of phases) {
@@ -534,6 +552,9 @@ for (const phase of phases) {
   // If voicedSec alone exceeds budgetSec by more than 2%, mark the phase for
   // targeted text compression/regeneration. Never create negative pauses.
 }
+
+// Then: distribute remaining shortfall as theta dwelling pauses (capped per slot)
+// so total wall clock ≈ sum(phase_budget_sec) = length_min × 60.
 ```
 
 The playback scheduler uses `actual_duration_sec + scheduled_pause_after_ms`, not estimated word counts.
@@ -554,7 +575,7 @@ The playback scheduler uses `actual_duration_sec + scheduled_pause_after_ms`, no
 | 7      | length, middle steps, posture, entrainment_mode, voice, senses_emphasis, aos_layer | selects          | length ∈ {10,15,30,45}; contiguous middle_start/middle_count per ladder; posture sitting\|lying; ≥2 senses | meta + skeleton |
 
 
-API defaults today (wizard step-selection UI lands in **v0.5-2**): length **45**, full middle (`middle_start=2`, `middle_count=10`), posture **sitting**. Server validates via skeleton helpers and rejects invalid combos.
+Wizard today: **length picker** (10/15/30/45) + posture + entrainment + voice; default length **30** with skeleton-chosen middle steps for that length. Contiguous **middle-step picker UI** is still deferred (API already accepts `middle_start` / `middle_count`). Server validates via skeleton helpers and rejects invalid combos. Reuse-prior-session answers are available when starting a new script from a previous intake.
 
 Design principle: chips and fixed-count inputs keep every intake item atomic, so the compiler can quote them verbatim. The user's exact words appear in their own voice during the session. This is the Daath principle operationalized: reality quality reflects communication quality, so the app never paraphrases the user.
 
@@ -596,10 +617,10 @@ The generation pipeline and audio node graphs are in Sections 1.1 and 1.3.
 | ------------------ | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Next.js app + PWA  | Vercel           | Service worker via serwist; cache manifest + audio segments for offline sessions                                                                                                                                                                 |
 | API routes         | Vercel functions | Thin: validate intake, build skeleton, spend minutes, insert rows, enqueue job, return script_id                                                                                                                                                 |
-| LLM + TTS work     | Inngest          | All long-running work; concurrency capped to the ElevenLabs plan                                                                                                                                                                                 |
+| LLM + TTS work     | Inngest          | Long-running generation; concurrency capped to the ElevenLabs plan; **stuck-generation-reaper** cron every 5 min refunds hard-killed zombies                                                                                                                                 |
 | Auth, DB, Realtime | Supabase         | Realtime channel per script for synthesis progress                                                                                                                                                                                               |
 | Audio storage      | Supabase Storage | Private bucket, signed URLs, Smart CDN; user voice assets under `{user_id}/...`, shared stock assets under `shared/...`; TTL defaults to 24h and service worker refreshes signed URLs before expiry; body caching makes repeat plays zero-egress |
-| Billing            | Stripe           | Subscriptions + minute top-ups; webhooks call `grant_subscription_minutes` / `grant_topup_minutes` via service role                                                                                                                              |
+| Billing            | Stripe           | Subscriptions + minute top-ups; webhooks call `grant_subscription_minutes` / `grant_topup_minutes` via service role. Optional **welcome grant** (env-toggled) credits topup on first onboarding.                                              |
 | Errors             | Sentry           | App Router instrumentation (`@sentry/nextjs`); optional locally via `SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN`                                                                                                                                      |
 
 
@@ -633,6 +654,10 @@ Examples: 10-min stock = **10**; 45-min own voice = **90**.
 
 **SQL surface:** `minutes_cost`, `spend_minutes`, `refund_minutes`, `grant_subscription_minutes`, `grant_topup_minutes`, table `minutes_ledger`.
 
+**Stuck-generation reaper.** Hard kills (Vercel timeout / crash) can leave scripts at `status=generating` forever and leak spent minutes (the failure-refund path only runs on caught errors). An Inngest cron every **5 minutes** finds scripts stuck generating **>10 minutes** with **0 ready segments**, marks them `failed` with a clear reason, and **refunds** spent minutes idempotently (skips if a `refund` ledger row already exists for that script).
+
+**Welcome grant (friends / demo).** When `WELCOME_GRANT_ENABLED=1`, a new user completing `/welcome` (`completeOnboarding`, `onboarded_at` null→set) receives a one-time `grant_topup_minutes` of `WELCOME_GRANT_MINUTES` (default **400**) into the **topup** pool. Idempotent: onboarded_at transition + ledger check. Flip the env var + redeploy to disable — no code change.
+
 **Credits (retired from generation):** `credit_balance`, `credit_ledger`, and `spend_credits` still exist for legacy rows/tests but are **not** used by `POST /api/scripts`.
 
 ### Pricing structure
@@ -640,7 +665,7 @@ Examples: 10-min stock = **10**; 45-min own voice = **90**.
 
 | Tier         | Price             | Includes                                                                                                                                 |
 | ------------ | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| Trial        | Free              | Demo / onboarding surfaces; generation requires minutes                                                                                  |
+| Trial        | Free              | Onboarding; optional one-time **welcome topup** when `WELCOME_GRANT_ENABLED=1`; generation otherwise requires minutes |
 | Guided       | **$29/mo**        | **240 minutes/mo** subscription pool; unlimited playback; Recognition Log                                                                |
 | Practitioner | **$49/mo**        | **640 minutes/mo**; Freeform / advanced surfaces as they ship                                                                            |
 | Top-up       | **$8 = 80 min**   | Adds to `topup_minutes`; never expires                                                                                                   |
@@ -660,9 +685,11 @@ Capacity planning still tracks ElevenLabs character spend separately from user-f
 
 **v0.5 — Customizable Protocol (current):**
 
-- **v0.5-1 (landed):** Server-owned compiler skeleton; length ladder 10/15/30/45; step model B; posture; counted-sequence timing; prompt **v2.0**; minutes charged by length.
-- **v0.5-2 (next):** Wizard UI for length + contiguous middle-step selection + posture.
+- **v0.5-1 (landed through ~1.12 / welcome grant):** Server-owned skeleton; length ladder 10/15/30/45; step model B; posture; self-paced breath; exact length via theta dwelling; fail-open compile-attempt-2 as its own Inngest step; person-agreement script-qa; tone mix cap; prompt **v2.5**; minutes = budgeted length × voice multiplier; welcome grant (env toggle); stuck-generation reaper cron.
+- **Wizard length + reuse (landed):** length picker + prior-session answer reuse. Contiguous middle-step picker UI still deferred (API ready).
 - Later v0.5: Recognition Log / re-triangulate polish; regen copy-through mode (D8).
+
+**v1:** Offline render + true background playback; Freeform sequencing; Practitioner surfaces beyond allotment.
 
 **v1:** Offline render + true background playback; Freeform sequencing; Practitioner surfaces beyond allotment.
 

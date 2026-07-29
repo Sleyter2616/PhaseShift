@@ -1,6 +1,6 @@
 # PhaseShift — open ambiguities
 
-Resolved Phase 0–10 and v0.5-1 items have been pruned. Keep only decisions that are still open or quality risks that are not yet product-closed.
+Resolved Phase 0–10 and landed v0.5-1.x / welcome-grant / length-reuse items have been pruned. Keep only decisions that are still open or quality risks that are not yet product-closed.
 
 ---
 
@@ -16,7 +16,7 @@ Resolved Phase 0–10 and v0.5-1 items have been pruned. Keep only decisions tha
 
 ## §2.3 — Gamma long-silence quality risk
 
-**Ambiguity:** Underwritten gamma text plus pause stretching can produce long gaps in the high-energy exit phase (quality smell, not a hard failure).
+**Ambiguity:** Underwritten gamma text plus pause stretching / dwelling can still produce long gaps in the high-energy exit phase (quality smell, not a hard failure). Theta dwelling is intentional for exact length; gamma remains capped more tightly.
 
 **Proposed resolution:** First-listen review; candidates include per-phase `scheduled_pause_after_ms` caps or tighter skeleton-owned pause slots for gamma counted sequences.
 
@@ -26,7 +26,7 @@ Resolved Phase 0–10 and v0.5-1 items have been pruned. Keep only decisions tha
 
 ## §2.4 — `aos_layer` collected but lightly consumed
 
-**Ambiguity:** Wizard / intake collect optional `aos_layer` (ego/self/persona/shadow) and persist it on `goals.aos_layer`. Prompt v2.0 lists it in INPUT but does not yet drive step-level semantics.
+**Ambiguity:** Wizard / intake collect optional `aos_layer` (ego/self/persona/shadow) and persist it on `goals.aos_layer`. Prompt v2.x lists it in INPUT but does not yet drive step-level semantics.
 
 **Proposed resolution:** Define aos-layer content rules in a future prompt version (immutable bump); until then treat as optional metadata.
 
@@ -54,10 +54,10 @@ Resolved Phase 0–10 and v0.5-1 items have been pruned. Keep only decisions tha
 
 ---
 
-## Wizard step selection UI (v0.5-2)
+## Wizard middle-step picker UI
 
-**Ambiguity:** API accepts `duration_min` / `length_min`, contiguous `middle_start` + `middle_count`, and `posture` with server validation via `skeleton.ts`. Wizard UI still locks length presentation and does not yet expose middle-step picking.
+**Ambiguity:** API accepts contiguous `middle_start` + `middle_count` with server validation. Wizard length picker + posture + reuse-prior landed; the UI still does not expose a middle-block picker (skeleton chooses the middle for the selected length).
 
-**Proposed resolution:** v0.5-2 wizard surfaces the length ladder and contiguous middle-block picker; defaults remain 45 / full arc / sitting.
+**Proposed resolution:** Ship a contiguous middle-block picker when product wants user-driven step selection; until then length-driven defaults remain correct.
 
-**Status:** Open (scheduled UI).
+**Status:** Open (deferred UI).
