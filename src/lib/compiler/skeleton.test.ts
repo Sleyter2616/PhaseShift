@@ -22,10 +22,10 @@ describe("LENGTHS ladder", () => {
 });
 
 describe("selectableMiddleCount", () => {
-  it("maps length to middle-step allowance", () => {
+  it("maps length to middle-step allowance (full arc at ≥30)", () => {
     expect(selectableMiddleCount(10)).toBe(1);
     expect(selectableMiddleCount(15)).toBe(2);
-    expect(selectableMiddleCount(30)).toBe(6);
+    expect(selectableMiddleCount(30)).toBe(10);
     expect(selectableMiddleCount(45)).toBe(10);
   });
 
@@ -38,7 +38,9 @@ describe("validateStepSelection", () => {
   it("returns bookended contiguous full list", () => {
     expect(validateStepSelection(10, 5, 1)).toEqual([1, 5, 12]);
     expect(validateStepSelection(15, 4, 2)).toEqual([1, 4, 5, 12]);
-    expect(validateStepSelection(30, 2, 6)).toEqual([1, 2, 3, 4, 5, 6, 7, 12]);
+    expect(validateStepSelection(30, 2, 10)).toEqual([
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+    ]);
     expect(validateStepSelection(45, 2, 10)).toEqual([
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
     ]);
@@ -54,7 +56,7 @@ describe("validateStepSelection", () => {
   });
 
   it("rejects selection that overflows past step 11", () => {
-    expect(() => validateStepSelection(30, 7, 6)).toThrow(/exceeds/);
+    expect(() => validateStepSelection(30, 7, 10)).toThrow(/exceeds/);
   });
 
   it("always bookends with 1 and 12", () => {
@@ -109,11 +111,14 @@ describe("buildPhaseBudget", () => {
     expect(buildPhaseBudget(15, steps, "sitting").posture).toBe("sitting");
   });
 
-  it("scales gamma up toward 240 at 45min", () => {
+  it("scales gamma from ~3min at 30 to ~5.5min at 45", () => {
     const b10 = buildPhaseBudget(10, validateStepSelection(10, 2, 1));
+    const b30 = buildPhaseBudget(30, validateStepSelection(30, 2, 10));
     const b45 = buildPhaseBudget(45, validateStepSelection(45, 2, 10));
+    expect(b30.gamma_sec).toBe(180);
+    expect(b45.gamma_sec).toBe(330);
+    expect(b45.gamma_sec).toBeGreaterThan(b30.gamma_sec);
     expect(b45.gamma_sec).toBeGreaterThan(b10.gamma_sec);
-    expect(b45.gamma_sec).toBeLessThanOrEqual(240);
   });
 });
 
@@ -133,7 +138,8 @@ describe("distributeThetaTime", () => {
 
   it("gives Visualize the heaviest share among selected steps", () => {
     const steps = validateStepSelection(45, 2, 10);
-    const timed = distributeThetaTime(1980, steps);
+    const { theta_sec } = buildPhaseBudget(45, steps);
+    const timed = distributeThetaTime(theta_sec, steps);
     const visualize = timed.find((t) => t.step === 1)!;
     for (const t of timed) {
       if (t.step === 1) continue;
@@ -198,5 +204,73 @@ describe("buildSessionSkeleton defaults", () => {
         skeleton.phase_budget.theta_sec +
         skeleton.phase_budget.gamma_sec,
     ).toBe(2700);
+  });
+});
+
+describe("v0.5-1.6 length-ladder calibration", () => {
+  it("runs the full 12-step arc at both 30 and 45", () => {
+    const s30 = buildSessionSkeleton({ length_min: 30 });
+    const s45 = buildSessionSkeleton({ length_min: 45 });
+    expect(s30.steps).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    expect(s45.steps).toEqual(s30.steps);
+  });
+
+  it("keeps 30-min theta at standard density (no padding inflation)", () => {
+    const s30 = buildSessionSkeleton({ length_min: 30 });
+    expect(s30.depth.density_factor).toBe(1);
+    expect(s30.phase_budget.gamma_sec).toBe(180);
+    // Natural full-arc theta: remainder after beta/alpha/gamma — not inflated.
+    expect(s30.phase_budget.theta_sec).toBe(1260);
+    const avgSec =
+      s30.theta_steps.reduce((a, t) => a + t.target_sec, 0) / s30.theta_steps.length;
+    expect(avgSec).toBeCloseTo(105, 0);
+    // Word targets match standard pacing × seconds (no density multiplier on words).
+    for (const step of s30.theta_steps) {
+      expect(step.target_words).toBe(Math.round((105 * step.target_sec) / 60));
+    }
+  });
+
+  it("gives 45-min meaningfully higher per-step word budgets than 30", () => {
+    const s30 = buildSessionSkeleton({ length_min: 30 });
+    const s45 = buildSessionSkeleton({ length_min: 45 });
+    expect(s45.depth.density_factor).toBe(1.5);
+    expect(s45.phase_budget.gamma_sec).toBeGreaterThan(s30.phase_budget.gamma_sec);
+    expect(s45.phase_budget.gamma_sec).toBe(330);
+
+    const avgWords30 =
+      s30.theta_steps.reduce((a, t) => a + t.target_words, 0) / s30.theta_steps.length;
+    const avgWords45 =
+      s45.theta_steps.reduce((a, t) => a + t.target_words, 0) / s45.theta_steps.length;
+    // ~40–50%+ more words/step via larger per-step seconds at same pacing.
+    expect(avgWords45 / avgWords30).toBeGreaterThanOrEqual(1.4);
+    expect(avgWords45 / avgWords30).toBeLessThanOrEqual(1.6);
+  });
+
+  it("plans more reflective pause slots at 45 than at 30", () => {
+    const s30 = buildSessionSkeleton({ length_min: 30 });
+    const s45 = buildSessionSkeleton({ length_min: 45 });
+    expect(s30.depth.reflective_pauses.within_step_slots).toBe(0);
+    expect(s45.depth.reflective_pauses.within_step_slots).toBe(12);
+    expect(
+      s45.depth.reflective_pauses.between_step_slots +
+        s45.depth.reflective_pauses.within_step_slots,
+    ).toBeGreaterThan(
+      s30.depth.reflective_pauses.between_step_slots +
+        s30.depth.reflective_pauses.within_step_slots,
+    );
+  });
+
+  it("keeps all length totals within ~10% of the label", () => {
+    for (const length of LENGTHS) {
+      const skeleton = buildSessionSkeleton({ length_min: length });
+      const total =
+        skeleton.phase_budget.beta_sec +
+        skeleton.phase_budget.alpha_sec +
+        skeleton.phase_budget.theta_sec +
+        skeleton.phase_budget.gamma_sec;
+      const labelSec = length * 60;
+      expect(total).toBe(labelSec);
+      expect(Math.abs(total - labelSec) / labelSec).toBeLessThanOrEqual(0.1);
+    }
   });
 });

@@ -1,6 +1,9 @@
 /**
  * Server-owned compiler skeleton — deterministic, no network/LLM.
  * Phase budgets, step selection, theta distribution, counted-sequence timing.
+ *
+ * Length ladder (v0.5-1.6): full 12-step arc at ≥30 min. Length past 30 buys
+ * DEPTH (sensory density, reflective pauses, extended gamma), not more steps.
  */
 
 export const LENGTHS = [10, 15, 30, 45] as const;
@@ -13,8 +16,20 @@ export const BOOKEND_END = 12;
 export const MIDDLE_STEP_MIN = 2;
 export const MIDDLE_STEP_MAX = 11;
 
+/** Lengths at/above this run the full 12-step arc (middle 2..11). */
+export const FULL_ARC_LENGTH_MIN: SessionLengthMin = 30;
+
+/** Baseline full-arc length: standard density (factor 1.0), ~3 min gamma. */
+export const STANDARD_FULL_ARC_MIN: SessionLengthMin = 30;
+
 /** Minimum theta seconds allocated per selected step. */
 export const THETA_PER_STEP_FLOOR_SEC = 60;
+
+/** Theta pacing used for word-budget targets exposed to the model. */
+export const THETA_PACING_WPM = 105;
+
+/** Modest contemplative pause between (and within) theta steps. */
+export const REFLECTIVE_PAUSE_MS = 4_000;
 
 export const STEP_NAMES: Record<number, string> = {
   1: "Visualize",
@@ -50,34 +65,15 @@ export const STEP_WEIGHTS: Record<number, number> = {
   12: 5,
 };
 
+/**
+ * Middle-step count by length. ≥30 → full middle (10) so 30 and 45 both run
+ * the complete 12-step arc; shorter lengths use a contiguous subset.
+ */
 const MIDDLE_COUNT_BY_LENGTH: Record<SessionLengthMin, number> = {
   10: 1,
   15: 2,
-  30: 6,
+  30: 10,
   45: 10,
-};
-
-const BETA_SEC_BY_LENGTH: Record<SessionLengthMin, number> = {
-  10: 0,
-  15: 60,
-  30: 90,
-  45: 120,
-};
-
-/** Alpha floor ~150s; scales to ~360s at 45. */
-const ALPHA_SEC_BY_LENGTH: Record<SessionLengthMin, number> = {
-  10: 150,
-  15: 180,
-  30: 270,
-  45: 360,
-};
-
-/** Gamma floor ~120s; scales mildly to ~240s at 45. */
-const GAMMA_SEC_BY_LENGTH: Record<SessionLengthMin, number> = {
-  10: 120,
-  15: 140,
-  30: 180,
-  45: 240,
 };
 
 export type PhaseBudget = {
@@ -91,6 +87,21 @@ export type PhaseBudget = {
 export type ThetaStepTiming = {
   step: number;
   target_sec: number;
+  /** Words at standard theta pacing for this step's target_sec. */
+  target_words: number;
+};
+
+export type ReflectivePausePlan = {
+  between_step_ms: number;
+  within_step_ms: number;
+  between_step_slots: number;
+  within_step_slots: number;
+};
+
+export type DepthCalibration = {
+  /** 1.0 at ≤30; ~1.5 at 45 — drives prompt depth, not step count. */
+  density_factor: number;
+  reflective_pauses: ReflectivePausePlan;
 };
 
 export type CountedSequenceKind = "breath" | "countdown" | "countup" | "energizing_breath";
@@ -128,6 +139,74 @@ export function selectableMiddleCount(lengthMin: number): number {
 }
 
 /**
+ * Content density vs the 30-min full-arc baseline.
+ * ≤30 → 1.0 (standard); scales linearly to 1.5 at 45 (~50% more words/step room).
+ */
+export function contentDensityFactor(lengthMin: SessionLengthMin): number {
+  if (lengthMin <= STANDARD_FULL_ARC_MIN) return 1;
+  return 1 + ((lengthMin - STANDARD_FULL_ARC_MIN) / 15) * 0.5;
+}
+
+/**
+ * Gamma budget as a function of length: ~3 min at 30, ~5.5 min at 45.
+ * Short lengths keep compact exit floors.
+ */
+export function gammaSecForLength(lengthMin: SessionLengthMin): number {
+  if (lengthMin === 10) return 120;
+  if (lengthMin === 15) return 140;
+  const t = Math.max(0, (lengthMin - STANDARD_FULL_ARC_MIN) / 15);
+  return Math.round(180 + t * (330 - 180));
+}
+
+export function betaSecForLength(lengthMin: SessionLengthMin): number {
+  if (lengthMin === 10) return 0;
+  if (lengthMin === 15) return 60;
+  if (lengthMin === 30) return 90;
+  return 120;
+}
+
+export function alphaSecForLength(lengthMin: SessionLengthMin): number {
+  if (lengthMin === 10) return 150;
+  if (lengthMin === 15) return 180;
+  if (lengthMin === 30) return 270;
+  return 360;
+}
+
+/**
+ * Reflective pause plan: more slots at depth lengths (within-step dwelling),
+ * each slot capped by REFLECTIVE_PAUSE_MS (≤ global scheduled-pause cap).
+ */
+export function thetaReflectivePausePlan(
+  lengthMin: SessionLengthMin,
+  stepCount: number,
+): ReflectivePausePlan {
+  const between = Math.max(0, stepCount - 1);
+  const density = contentDensityFactor(lengthMin);
+  const depth = density - 1; // 0 at ≤30, 0.5 at 45
+  return {
+    between_step_ms: REFLECTIVE_PAUSE_MS,
+    within_step_ms: depth > 0 ? REFLECTIVE_PAUSE_MS : 0,
+    between_step_slots: between,
+    // At 45 (depth 0.5): one within-step dwell slot per step.
+    within_step_slots: depth > 0 ? Math.round(stepCount * (depth / 0.5)) : 0,
+  };
+}
+
+export function buildDepthCalibration(
+  lengthMin: SessionLengthMin,
+  stepCount: number,
+): DepthCalibration {
+  return {
+    density_factor: contentDensityFactor(lengthMin),
+    reflective_pauses: thetaReflectivePausePlan(lengthMin, stepCount),
+  };
+}
+
+export function thetaWordBudget(targetSec: number, pacingWpm = THETA_PACING_WPM): number {
+  return Math.round((pacingWpm * targetSec) / 60);
+}
+
+/**
  * Validates contiguous middle selection within 2..11 matching the length
  * allowance. Returns ordered full step list [1, ...middle..., 12].
  */
@@ -161,7 +240,6 @@ export function validateStepSelection(
   }
 
   const middle = Array.from({ length: middleCount }, (_, i) => middleStart + i);
-  // Contiguity is implied by arithmetic sequence; assert explicitly.
   for (let i = 1; i < middle.length; i += 1) {
     if (middle[i]! !== middle[i - 1]! + 1) {
       throw new SkeletonValidationError("middle steps must be contiguous");
@@ -190,9 +268,9 @@ export function buildPhaseBudget(
   }
 
   const totalSec = lengthMin * 60;
-  const beta_sec = BETA_SEC_BY_LENGTH[lengthMin];
-  const alpha_sec = ALPHA_SEC_BY_LENGTH[lengthMin];
-  const gamma_sec = GAMMA_SEC_BY_LENGTH[lengthMin];
+  const beta_sec = betaSecForLength(lengthMin);
+  const alpha_sec = alphaSecForLength(lengthMin);
+  const gamma_sec = gammaSecForLength(lengthMin);
   const theta_sec = totalSec - beta_sec - alpha_sec - gamma_sec;
 
   if (theta_sec <= 0) {
@@ -250,7 +328,6 @@ export function distributeThetaTime(theta_sec: number, steps: number[]): ThetaSt
     remainder -= 1;
   }
 
-  // Enforce per-step floor by borrowing from the heaviest step if needed.
   for (let i = 0; i < targets.length; i += 1) {
     if (targets[i]! < THETA_PER_STEP_FLOOR_SEC) {
       const deficit = THETA_PER_STEP_FLOOR_SEC - targets[i]!;
@@ -270,7 +347,11 @@ export function distributeThetaTime(theta_sec: number, steps: number[]): ThetaSt
     throw new SkeletonValidationError(`theta distribution sum ${sum} !== ${theta_sec}`);
   }
 
-  return steps.map((step, i) => ({ step, target_sec: targets[i]! }));
+  return steps.map((step, i) => ({
+    step,
+    target_sec: targets[i]!,
+    target_words: thetaWordBudget(targets[i]!),
+  }));
 }
 
 /** Fixed breath ratio: inhale 4s / hold 2s / exhale 8s / pause 2s (per cycle). */
@@ -326,7 +407,6 @@ export function buildCountedSequence(
   }
 
   if (kind === "countdown" || kind === "countup") {
-    // Reserve 1s pause between each pair of counts when totalSec allows.
     const pauseSlots = Math.max(0, count - 1);
     const pauseEach = totalSec >= count + pauseSlots ? 1 : 0;
     const speakPool = totalSec - pauseEach * pauseSlots;
@@ -342,7 +422,6 @@ export function buildCountedSequence(
       }
     }
   } else {
-    // energizing_breath: rounds of fast nasal breaths with holds between rounds
     const rounds = count;
     const perRound = Math.floor(totalSec / rounds);
     let used = 0;
@@ -392,6 +471,7 @@ export type SessionSkeleton = {
   posture: Posture;
   phase_budget: PhaseBudget;
   theta_steps: ThetaStepTiming[];
+  depth: DepthCalibration;
   counted_sequences: {
     alpha_breath: CountedSequence;
     alpha_countdown: CountedSequence;
@@ -421,8 +501,8 @@ export function buildSessionSkeleton(input: {
   const steps = validateStepSelection(length_min, middle_start, middle_count);
   const phase_budget = buildPhaseBudget(length_min, steps, posture);
   const theta_steps = distributeThetaTime(phase_budget.theta_sec, steps);
+  const depth = buildDepthCalibration(length_min, steps.length);
 
-  // Counted sequences sized from phase budgets (server-owned pacing).
   const alphaBreathSec = Math.max(BREATH_CYCLE_SEC, Math.floor(phase_budget.alpha_sec * 0.45));
   const alphaCountdownSec = Math.max(20, Math.floor(phase_budget.alpha_sec * 0.25));
   const gammaEnergizingSec = Math.max(30, Math.floor(phase_budget.gamma_sec * 0.5));
@@ -435,6 +515,7 @@ export function buildSessionSkeleton(input: {
     posture,
     phase_budget,
     theta_steps,
+    depth,
     counted_sequences: {
       alpha_breath: buildCountedSequence("breath", alphaBreathCycles, alphaBreathSec),
       alpha_countdown: buildCountedSequence("countdown", 10, alphaCountdownSec),

@@ -11,7 +11,7 @@ import { intake15Min, intake45Min } from "../fixtures/intake";
 import type { Intake } from "../contracts/intake";
 
 function intakeWithDuration(duration: 10 | 15 | 30 | 45): Intake {
-  const middle_count = { 10: 1, 15: 2, 30: 6, 45: 10 }[duration];
+  const middle_count = { 10: 1, 15: 2, 30: 10, 45: 10 }[duration];
   return {
     ...intake45Min,
     session: {
