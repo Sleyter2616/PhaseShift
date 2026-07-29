@@ -19,11 +19,11 @@ describe("intakeSchema", () => {
     expect(parsed.session.middle_count).toBe(2);
   });
 
-  it("defaults to 45-min full-arc sitting when session omitted", () => {
+  it("defaults to 30-min full-arc sitting when session omitted", () => {
     const { session: _omit, ...rest } = intake45Min;
     void _omit;
     const parsed = intakeSchema.parse(rest);
-    expect(parsed.session.duration_min).toBe(45);
+    expect(parsed.session.duration_min).toBe(30);
     expect(parsed.session.middle_count).toBe(10);
     expect(parsed.session.posture).toBe("sitting");
   });

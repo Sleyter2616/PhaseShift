@@ -7,9 +7,9 @@ import { ChoiceControl } from "@/components/choice-control";
 import {
   availableMinutes,
   minutesCost,
-  SESSION_LENGTH_MINUTES,
   TOPUP_MINUTES,
 } from "@/lib/billing/minutes";
+import { LENGTHS } from "@/lib/compiler/skeleton";
 import {
   hasConcreteNounToken,
   maxTimeframeIsoDate,
@@ -23,8 +23,11 @@ import {
   draftToIntake,
   EMPTY_WIZARD_DRAFT,
   validateWizardStep,
+  withSessionLength,
   type WizardDraft,
+  type WizardLengthMin,
 } from "@/lib/contracts/wizard";
+import type { PriorSessionOption } from "@/lib/contracts/wizard-from-prior";
 import { WIZARD_STEP_COPY } from "@/lib/contracts/wizard-copy";
 import type { StockVoiceOption } from "@/lib/voice/stock-voices";
 import { ChipInput } from "./chip-input";
@@ -42,6 +45,11 @@ interface WizardFlowProps {
     topup: number;
     resetAt: string | null;
   };
+  priorSessions?: PriorSessionOption[];
+  /** Full drafts keyed by script id for reuse (payload from server). */
+  priorDrafts?: Record<string, WizardDraft>;
+  initialDraft?: WizardDraft | null;
+  initialFromScriptId?: string | null;
 }
 
 type InsufficientPayload = {
@@ -59,14 +67,34 @@ export function WizardFlow({
   readyVoiceProfileId,
   stockVoices,
   minutesBalance,
+  priorSessions = [],
+  priorDrafts = {},
+  initialDraft = null,
+  initialFromScriptId = null,
 }: WizardFlowProps) {
   const router = useRouter();
   const defaultStockId = stockVoices[0]?.id ?? null;
   const [step, setStep] = useState(1);
-  const [draft, setDraft] = useState<WizardDraft>({
-    ...EMPTY_WIZARD_DRAFT,
-    stock_voice_id: defaultStockId,
+  const [draft, setDraft] = useState<WizardDraft>(() => {
+    if (initialDraft) {
+      return {
+        ...initialDraft,
+        stock_voice_id: initialDraft.stock_voice_id ?? defaultStockId,
+        voice_profile_id:
+          initialDraft.voice_profile_id &&
+          readyVoiceProfileId &&
+          initialDraft.voice_profile_id === readyVoiceProfileId
+            ? initialDraft.voice_profile_id
+            : null,
+      };
+    }
+    return {
+      ...EMPTY_WIZARD_DRAFT,
+      stock_voice_id: defaultStockId,
+    };
   });
+  const [reusedFromId, setReusedFromId] = useState<string | null>(initialFromScriptId);
+  const [showReusePicker, setShowReusePicker] = useState(false);
   const [stepError, setStepError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [insufficient, setInsufficient] = useState<InsufficientPayload | null>(null);
@@ -78,13 +106,14 @@ export function WizardFlow({
   const showRewriteChip = PRESENT_TENSE_GOAL_PATTERN.test(draft.goal_statement);
   const goalCharCount = draft.goal_statement.length;
   const isOwnVoice = draft.voice_profile_id != null;
-  const sessionCost = minutesCost(SESSION_LENGTH_MINUTES, isOwnVoice);
+  const lengthMin = draft.session.duration_min;
+  const sessionCost = minutesCost(lengthMin, isOwnVoice);
   const balanceTotal = availableMinutes({
     subscription: minutesBalance.subscription,
     topup: minutesBalance.topup,
   });
-  const stockCost = minutesCost(SESSION_LENGTH_MINUTES, false);
-  const ownCost = minutesCost(SESSION_LENGTH_MINUTES, true);
+  const stockCost = minutesCost(lengthMin, false);
+  const ownCost = minutesCost(lengthMin, true);
 
   const dateBounds = useMemo(
     () => ({ min: todayIsoDate(), max: maxTimeframeIsoDate() }),
@@ -95,6 +124,40 @@ export function WizardFlow({
     setDraft((current) => ({ ...current, ...patch }));
     setStepError(null);
     setInsufficient(null);
+  }
+
+  function setLength(length: WizardLengthMin) {
+    updateDraft({
+      session: withSessionLength(draft.session, length),
+    });
+  }
+
+  function applyPriorSession(scriptId: string) {
+    const prior = priorDrafts[scriptId];
+    if (!prior) return;
+    const ownVoiceOk =
+      prior.voice_profile_id != null &&
+      readyVoiceProfileId != null &&
+      prior.voice_profile_id === readyVoiceProfileId;
+    setDraft({
+      ...prior,
+      voice_profile_id: ownVoiceOk ? prior.voice_profile_id : null,
+      stock_voice_id: prior.stock_voice_id ?? defaultStockId,
+    });
+    setReusedFromId(scriptId);
+    setShowReusePicker(false);
+    setStep(1);
+    setStepError(null);
+    setInsufficient(null);
+  }
+
+  function clearReuse() {
+    setDraft({
+      ...EMPTY_WIZARD_DRAFT,
+      stock_voice_id: defaultStockId,
+    });
+    setReusedFromId(null);
+    setStep(1);
   }
 
   function selectStockVoice(voiceId: string) {
@@ -246,6 +309,59 @@ export function WizardFlow({
 
   return (
     <div className="space-y-8">
+      {priorSessions.length > 0 ? (
+        <section className="space-y-3 rounded border border-[var(--setup-border)] bg-[var(--setup-panel)] p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="setup-label">Start from a previous session</p>
+              <p className="mt-1 text-sm text-[var(--text-mid)]">
+                Prefill answers, then edit anything before generating.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn-ghost px-3 py-1.5 text-sm"
+              onClick={() => setShowReusePicker((open) => !open)}
+            >
+              {showReusePicker ? "Hide" : "Browse"}
+            </button>
+          </div>
+          {reusedFromId ? (
+            <p className="text-sm text-[var(--text-hi)]">
+              Loaded prior answers.{" "}
+              <button type="button" className="btn-link" onClick={clearReuse}>
+                Clear and start blank
+              </button>
+            </p>
+          ) : null}
+          {showReusePicker ? (
+            <ul className="max-h-56 space-y-2 overflow-y-auto">
+              {priorSessions.map((session) => (
+                <li key={session.id}>
+                  <button
+                    type="button"
+                    className="w-full rounded border border-[var(--setup-border)] px-3 py-2 text-left hover:bg-[color-mix(in_srgb,var(--setup-panel)_80%,var(--text-hi)_4%)]"
+                    onClick={() => applyPriorSession(session.id)}
+                  >
+                    <p className="truncate text-sm font-medium text-[var(--text-hi)]">
+                      {session.goal_statement}
+                    </p>
+                    <p className="mt-0.5 text-xs text-[var(--text-mid)]">
+                      {session.duration_min != null ? `${session.duration_min} min · ` : ""}
+                      {new Date(session.created_at).toLocaleDateString(undefined, {
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric",
+                      })}
+                    </p>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </section>
+      ) : null}
+
       <header className="space-y-3">
         <p className="step-eyebrow">
           Step {String(step).padStart(2, "0")} / {String(STEP_COUNT).padStart(2, "0")}
@@ -494,12 +610,29 @@ export function WizardFlow({
 
       {step === 7 ? (
         <section className="space-y-6">
-          <div>
-            <p className="setup-label">Duration</p>
-            <p className="setup-input mt-1.5 cursor-default opacity-90">
-              45 minutes (locked) — more lengths coming in v0.5-2
+          <fieldset>
+            <legend className="setup-label">Session length</legend>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {LENGTHS.map((length) => {
+                const selected = draft.session.duration_min === length;
+                return (
+                  <button
+                    key={length}
+                    type="button"
+                    onClick={() => setLength(length)}
+                    className={`chip-pill ${selected ? "chip-pill-active" : ""}`}
+                  >
+                    {length} min
+                  </button>
+                );
+              })}
+            </div>
+            <p className="margin-note mt-2">
+              {lengthMin <= 15
+                ? "Shorter sessions use a focused subset of the protocol steps."
+                : "30 and 45 run the full 12-step arc; 45 goes deeper, not wider."}
             </p>
-          </div>
+          </fieldset>
 
           <fieldset>
             <legend className="setup-label">Entrainment mode</legend>

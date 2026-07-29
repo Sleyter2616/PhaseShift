@@ -482,7 +482,7 @@ export type SessionSkeleton = {
 
 /**
  * Build the full server-owned skeleton for a session.
- * Defaults: length 45, full middle (2..11), sitting.
+ * Defaults: length 30 (full-arc baseline), full middle (2..11), sitting.
  */
 export function buildSessionSkeleton(input: {
   length_min?: number;
@@ -490,7 +490,7 @@ export function buildSessionSkeleton(input: {
   middle_count?: number;
   posture?: Posture;
 }): SessionSkeleton {
-  const length_min = (input.length_min ?? 45) as number;
+  const length_min = (input.length_min ?? 30) as number;
   if (!isSessionLengthMin(length_min)) {
     throw new SkeletonValidationError(`invalid length_min: ${length_min}`);
   }
