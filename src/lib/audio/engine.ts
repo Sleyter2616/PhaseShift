@@ -1,4 +1,5 @@
 import { ensureClockAlive as checkClockAlive } from "./clock-watchdog";
+import { TONE_GAIN_DEFAULT, VOICE_GAIN_DEFAULT } from "./mix";
 
 export type EntrainmentMode = "binaural" | "isochronic";
 
@@ -35,8 +36,8 @@ export class EntrainmentEngine {
     this.toneGain = this.ctx.createGain();
     this.voiceGain = this.ctx.createGain();
 
-    this.toneGain.gain.value = options.toneGain ?? 0.12;
-    this.voiceGain.gain.value = options.voiceGain ?? 1.0;
+    this.toneGain.gain.value = options.toneGain ?? TONE_GAIN_DEFAULT;
+    this.voiceGain.gain.value = options.voiceGain ?? VOICE_GAIN_DEFAULT;
 
     this.toneGain.connect(this.master);
     this.voiceGain.connect(this.master);
