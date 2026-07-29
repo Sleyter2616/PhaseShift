@@ -127,7 +127,8 @@ export async function retryFailedScriptSynthesis(
     throw new Error(synthError.message);
   }
 
-  const { updates, overBudgetPhases } = reconcileSegments(synthSegments ?? [], phaseBudget);
+  const { updates, overBudgetPhases, totalSec, targetTotalSec, withinTolerance } =
+    reconcileSegments(synthSegments ?? [], phaseBudget);
   for (const update of updates) {
     const { error } = await supabase
       .from("script_segments")
@@ -138,28 +139,15 @@ export async function retryFailedScriptSynthesis(
     }
   }
 
-  const { data: finalSegments, error: finalError } = await supabase
-    .from("script_segments")
-    .select("actual_duration_sec, scheduled_pause_after_ms")
-    .eq("script_id", scriptId);
-
-  if (finalError) {
-    throw new Error(finalError.message);
-  }
-
-  const totalDurationSec = Math.round(
-    (finalSegments ?? []).reduce(
-      (sum, row) =>
-        sum +
-        Number(row.actual_duration_sec ?? 0) +
-        Number(row.scheduled_pause_after_ms ?? 0) / 1000,
-      0,
-    ),
-  );
+  const totalDurationSec = Math.round(totalSec);
 
   let overageWarning: string | null = null;
   if (overBudgetPhases.length > 0) {
     overageWarning = `OVERAGE: phases ${overBudgetPhases.join(",")} exceed voiced budget by >2%`;
+  }
+  if (!withinTolerance) {
+    const lengthWarn = `LENGTH: reconciled ${totalSec.toFixed(1)}s vs target ${targetTotalSec}s`;
+    overageWarning = overageWarning ? `${overageWarning}; ${lengthWarn}` : lengthWarn;
   }
 
   await supabase

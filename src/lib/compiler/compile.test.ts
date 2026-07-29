@@ -10,6 +10,14 @@ import { COMPILER_PROMPT_V2_2 } from "./prompt.v2.2";
 import type { CompilerInput } from "../session/derive";
 import { DEFAULT_ENTRAINMENT_PLAN } from "../session/derive";
 
+function padWords(minWords: number): string {
+  const unit = "I hold the scene with steady focus and clear sensory detail";
+  const words = unit.split(/\s+/);
+  const out: string[] = [];
+  while (out.length < minWords) out.push(...words);
+  return out.slice(0, Math.max(minWords, 1)).join(" ");
+}
+
 function buildCompilerInput(lengthMin: 15 | 45): CompilerInput {
   const middle_count = lengthMin === 15 ? 2 : 10;
   const skeleton = buildSessionSkeleton({
@@ -63,14 +71,19 @@ function buildCompilerInput(lengthMin: 15 | 45): CompilerInput {
  * Model-shaped draft: intentionally omits server-owned fields
  * (total_duration_sec, entrainment_plan, seq, pacing_wpm).
  */
-function modelOwnedManifestDraft(input: CompilerInput): Record<string, unknown> {
+function modelOwnedManifestDraft(
+  input: CompilerInput,
+  options?: { sparseTheta?: boolean },
+): Record<string, unknown> {
   const budget = input.session.phase_budget_sec;
   const steps = input.skeleton.steps;
   const thetaTargets = input.skeleton.theta_steps;
+  const pacing = input.session.pacing;
 
   const segments: Array<Record<string, unknown>> = [];
 
   if (budget.beta > 0) {
+    const betaWords = Math.ceil(((pacing.beta_wpm * budget.beta) / 60) * 0.9);
     segments.push({
       phase: "beta",
       step: null,
@@ -80,10 +93,12 @@ function modelOwnedManifestDraft(input: CompilerInput): Record<string, unknown> 
       archetype: null,
       target_duration_sec: budget.beta,
       pause_after_ms: 1000,
-      text: "You are here. The protocol begins now.",
+      text: padWords(betaWords),
     });
   }
 
+  const alphaRemain = Math.max(30, Math.floor(budget.alpha * 0.3));
+  const alphaWords = Math.ceil(((pacing.alpha_wpm * alphaRemain) / 60) * 0.9);
   segments.push({
     phase: "alpha",
     step: null,
@@ -93,7 +108,7 @@ function modelOwnedManifestDraft(input: CompilerInput): Record<string, unknown> 
     archetype: null,
     target_duration_sec: budget.alpha,
     pause_after_ms: 1000,
-    text: 'You breathe slowly. <break time="2.0s"/> Soften.',
+    text: padWords(alphaWords),
   });
 
   for (const timing of thetaTargets) {
@@ -106,10 +121,13 @@ function modelOwnedManifestDraft(input: CompilerInput): Record<string, unknown> 
       archetype: null,
       target_duration_sec: timing.target_sec,
       pause_after_ms: 500,
-      text: "I hold the scene with steady focus and clear detail.",
+      text: options?.sparseTheta
+        ? "I hold a thin scene."
+        : padWords(Math.ceil(timing.target_words * 0.9)),
     });
   }
 
+  const gammaWords = Math.ceil(((pacing.gamma_wpm * budget.gamma) / 60) * 0.5);
   segments.push({
     phase: "gamma",
     step: null,
@@ -119,14 +137,13 @@ function modelOwnedManifestDraft(input: CompilerInput): Record<string, unknown> 
     archetype: null,
     target_duration_sec: budget.gamma,
     pause_after_ms: 500,
-    text: "You rise with energy and take the next action.",
+    text: padWords(Math.max(20, gammaWords)),
   });
 
   void steps;
   return {
     meta: {
       goal_version_id: input.goal_version_id,
-      // Intentionally omit total_duration_sec, phase_budget_sec, entrainment_plan
     },
     segments,
   };
@@ -185,7 +202,6 @@ describe("compileManifest", () => {
     async (lengthMin) => {
       const input = buildCompilerInput(lengthMin);
       const draft = modelOwnedManifestDraft(input);
-      // Prove the draft is missing server-owned fields before injection.
       expect(draft.meta).not.toHaveProperty("total_duration_sec");
       expect(draft.meta).not.toHaveProperty("entrainment_plan");
       expect((draft.segments as object[])[0]).not.toHaveProperty("seq");
@@ -224,6 +240,33 @@ describe("compileManifest", () => {
       }
     },
   );
+
+  it("retries once when compile-time length estimate is under 92%", async () => {
+    const input = buildCompilerInput(15);
+    const sparse = modelOwnedManifestDraft(input, { sparseTheta: true });
+    const filled = modelOwnedManifestDraft(input);
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce({
+        stop_reason: "end_turn",
+        usage: { input_tokens: 10, output_tokens: 100 },
+        content: [{ type: "text", text: JSON.stringify(sparse) }],
+      })
+      .mockResolvedValueOnce({
+        stop_reason: "end_turn",
+        usage: { input_tokens: 10, output_tokens: 100 },
+        content: [{ type: "text", text: JSON.stringify(filled) }],
+      });
+
+    const manifest = await compileManifest(input, {
+      client: { messages: { create } } as never,
+    });
+
+    expect(create).toHaveBeenCalledTimes(2);
+    const retryUser = create.mock.calls[1]![0].messages[0].content as string;
+    expect(retryUser).toContain("LENGTH UNDERFILL");
+    expect(manifest.segments.some((s) => s.phase === "theta")).toBe(true);
+  });
 
   it("populates rawResponse on final CompilerError", async () => {
     const raw = "```json\n{ definitely not valid }\n```";
