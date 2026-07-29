@@ -100,7 +100,7 @@ describe("runStuckGenerationReaper", () => {
             update(payload: Record<string, unknown>) {
               updates.push(payload);
               return {
-                eq(_col: string, _val: string) {
+                eq(_col: string) {
                   if (_col === "id") {
                     return {
                       eq(_col2: string, statusVal: string) {
