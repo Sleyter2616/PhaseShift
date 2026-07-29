@@ -161,10 +161,8 @@ export const generateScript = inngest.createFunction(
         if (error) throw new Error(error.message);
 
         const phaseBudget = scriptCtx.compiler_input.session.phase_budget_sec;
-        const { updates, overBudgetPhases } = reconcileSegments(
-          synthSegments ?? [],
-          phaseBudget,
-        );
+        const { updates, overBudgetPhases, totalSec, targetTotalSec, withinTolerance } =
+          reconcileSegments(synthSegments ?? [], phaseBudget);
 
         for (const update of updates) {
           await supabase
@@ -176,6 +174,10 @@ export const generateScript = inngest.createFunction(
         let overageWarning: string | null = null;
         if (overBudgetPhases.length > 0) {
           overageWarning = `OVERAGE: phases ${overBudgetPhases.join(",")} exceed voiced budget by >2%`;
+        }
+        if (!withinTolerance) {
+          const lengthWarn = `LENGTH: reconciled ${totalSec.toFixed(1)}s vs target ${targetTotalSec}s`;
+          overageWarning = overageWarning ? `${overageWarning}; ${lengthWarn}` : lengthWarn;
         }
 
         return { overageWarning };

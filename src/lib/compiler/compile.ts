@@ -20,6 +20,11 @@ import {
   PROMPT_VERSION as PROMPT_VERSION_V2_2,
 } from "../compiler/prompt.v2.2";
 import { stripCodeFences } from "../compiler/strip-fences";
+import {
+  estimateManifestWallClockSec,
+  formatLengthExpandRetryMessage,
+  isCompileEstimateUnderfilled,
+} from "./estimate-duration";
 import { validateManifest, type Manifest } from "../contracts/manifest";
 import { compilerInputForModel, type CompilerInput } from "../session/derive";
 
@@ -53,6 +58,9 @@ export function formatCompilerFailureMessage(error: CompilerError): string {
 
 const RETRY_SUFFIX =
   "\n\nRe-emit ONLY the corrected JSON object. No explanation. No word counts.\nWhen fixing text-level errors, do not change any target_duration_sec value or the segment structure.";
+
+const LENGTH_EXPAND_SUFFIX =
+  "\n\nRe-emit ONLY the corrected JSON object. Expand theta spoken text toward each step's target_words. Keep target_duration_sec values and segment/step structure unchanged.";
 
 function logCompileAttempt(
   attempt: number,
@@ -181,6 +189,31 @@ export async function compileManifest(
           `meta.goal_version_id mismatch: expected ${compilerInput.goal_version_id}, got ${result.data.meta.goal_version_id}`,
         ];
       } else {
+        const estimatedSec = estimateManifestWallClockSec(result.data);
+        const targetSec = result.data.meta.total_duration_sec;
+        if (isCompileEstimateUnderfilled(estimatedSec, targetSec) && attempt === 0) {
+          const expandMessage = formatLengthExpandRetryMessage({
+            estimatedSec,
+            targetSec,
+            thetaSteps: compilerInput.skeleton.theta_steps,
+            segments: result.data.segments,
+          });
+          lastErrors = [
+            `compile length estimate ${estimatedSec.toFixed(1)}s < 92% of target ${targetSec}s`,
+          ];
+          console.error(`length-gate: ${lastErrors[0]}`);
+          const attemptInfo = {
+            attempt: attempt + 1,
+            validationErrors: lastErrors,
+            validationWarnings: result.warnings,
+            normalizeActions,
+          };
+          attempts.push(attemptInfo);
+          options?.onAttempt?.(attemptInfo);
+          userMessage = `${JSON.stringify(compilerInputForModel(compilerInput))}\n\n${expandMessage}${LENGTH_EXPAND_SUFFIX}`;
+          continue;
+        }
+
         const attemptInfo = {
           attempt: attempt + 1,
           validationErrors: [],
