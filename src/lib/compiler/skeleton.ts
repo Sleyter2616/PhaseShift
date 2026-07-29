@@ -285,7 +285,6 @@ export const BREATH_CUES = {
   inhale: "Breathe in.",
   hold: "Hold.",
   exhale: "Breathe out.",
-  pause: "Rest.",
 } as const;
 
 /**

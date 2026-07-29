@@ -1,8 +1,9 @@
 export const PHASES = ["beta", "alpha", "theta", "gamma"] as const;
 export type PhaseKey = (typeof PHASES)[number];
 
-/** Hard cap: never schedule multi-minute dead air between segments. */
-export const MAX_SCHEDULED_PAUSE_MS = 5_000;
+/** Hard cap: never schedule multi-minute dead air between segments.
+ *  Must allow intentional breath exhale (8s) + folded rest (2s) = 10s. */
+export const MAX_SCHEDULED_PAUSE_MS = 10_000;
 
 export interface ReconcileSegment {
   phase: PhaseKey;

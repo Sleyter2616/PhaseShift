@@ -95,6 +95,26 @@ describe("lookahead windows", () => {
     expect(later).toEqual([{ seq: 2, atCtxTime: 110 }]);
   });
 
+  it("catch-up schedules a late-starting voice with buffer offset", () => {
+    const schedule = computeSegmentSchedule(PLAYBACK_FIXTURE.segments);
+    const sessionStart = 100;
+    // First segment should have started at 100; clock is already at 100.5.
+    const due = voicesDueInWindow(schedule, sessionStart, 100.5, new Set());
+    expect(due).toEqual([{ seq: 1, atCtxTime: 100.5, offsetSec: 0.5 }]);
+  });
+
+  it("does not catch-up a voice whose audible window has ended", () => {
+    const schedule = computeSegmentSchedule(PLAYBACK_FIXTURE.segments);
+    const sessionStart = 100;
+    // Seq 1 voice ends at 110; past that it must not reappear.
+    const afterSeq1 = voicesDueInWindow(schedule, sessionStart, 110.25, new Set());
+    expect(afterSeq1.every((event) => event.seq !== 1)).toBe(true);
+    expect(afterSeq1).toHaveLength(1);
+    expect(afterSeq1[0]?.seq).toBe(2);
+    expect(afterSeq1[0]?.atCtxTime).toBe(110.25);
+    expect(afterSeq1[0]?.offsetSec).toBeCloseTo(0.25, 6);
+  });
+
   it("selects glide boundaries inside the lookahead window", () => {
     const schedule = computeSegmentSchedule(PLAYBACK_FIXTURE.segments);
     const glides = deriveGlideBoundaries(schedule, PLAYBACK_FIXTURE.meta.entrainment_plan);
