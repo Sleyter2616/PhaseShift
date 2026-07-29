@@ -37,8 +37,11 @@ export function estimateManifestWallClockSec(
 /** Content must estimate to at least this fraction of length_min*60 before synth. */
 export const COMPILE_LENGTH_MIN_RATIO = 0.97;
 
-/** How many times we recompile solely to expand underfilled theta content. */
-export const MAX_LENGTH_EXPAND_RETRIES = 2;
+/** Max in-process length expands (0): expand runs as a separate Inngest step. */
+export const MAX_LENGTH_EXPAND_RETRIES = 0;
+
+/** Pipeline may run at most one expand compile (attempt-2) in its own step. */
+export const MAX_PIPELINE_LENGTH_EXPAND_ATTEMPTS = 1;
 
 export function isCompileEstimateUnderfilled(
   estimatedSec: number,

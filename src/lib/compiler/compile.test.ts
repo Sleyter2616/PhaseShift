@@ -244,37 +244,7 @@ describe("compileManifest", () => {
     },
   );
 
-  it("retries when compile-time length estimate is under 97%", async () => {
-    const input = buildCompilerInput(15);
-    const sparse = modelOwnedManifestDraft(input, { sparseTheta: true });
-    const filled = modelOwnedManifestDraft(input);
-    const create = vi
-      .fn()
-      .mockResolvedValueOnce({
-        stop_reason: "end_turn",
-        usage: { input_tokens: 10, output_tokens: 100 },
-        content: [{ type: "text", text: JSON.stringify(sparse) }],
-      })
-      .mockResolvedValueOnce({
-        stop_reason: "end_turn",
-        usage: { input_tokens: 10, output_tokens: 100 },
-        content: [{ type: "text", text: JSON.stringify(filled) }],
-      });
-
-    const manifest = await compileManifest(input, {
-      client: { messages: { create } } as never,
-    });
-
-    expect(create).toHaveBeenCalledTimes(2);
-    const retryUser = create.mock.calls[1]![0].messages[0].content as string;
-    expect(retryUser).toContain("LENGTH UNDERFILL");
-    expect(retryUser).toContain("target is 15");
-    expect(retryUser).toContain("under their word budgets");
-    expect(retryUser).toContain("Do not add steps");
-    expect(manifest.segments.some((s) => s.phase === "theta")).toBe(true);
-  });
-
-  it("allows a second length-expand retry before accepting underfill", async () => {
+  it("accepts underfill without a second in-process Claude call", async () => {
     const input = buildCompilerInput(15);
     const sparse = modelOwnedManifestDraft(input, { sparseTheta: true });
     const create = vi.fn().mockResolvedValue({
@@ -287,10 +257,28 @@ describe("compileManifest", () => {
       client: { messages: { create } } as never,
     });
 
-    // initial + 2 expand retries, then accept sparse
-    expect(create).toHaveBeenCalledTimes(3);
-    expect(create.mock.calls[1]![0].messages[0].content).toContain("LENGTH UNDERFILL");
-    expect(create.mock.calls[2]![0].messages[0].content).toContain("LENGTH UNDERFILL");
+    // Length expand is a separate Inngest step — not a sync re-call here.
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(manifest.segments.some((s) => s.phase === "theta")).toBe(true);
+  });
+
+  it("runs an expand compile when given initialUserMessage (pipeline attempt-2)", async () => {
+    const input = buildCompilerInput(15);
+    const filled = modelOwnedManifestDraft(input);
+    const create = vi.fn().mockResolvedValue({
+      stop_reason: "end_turn",
+      usage: { input_tokens: 10, output_tokens: 100 },
+      content: [{ type: "text", text: JSON.stringify(filled) }],
+    });
+
+    const expandMsg = `${JSON.stringify({ expand: true })}\n\nLENGTH UNDERFILL: expand theta`;
+    const manifest = await compileManifest(input, {
+      client: { messages: { create } } as never,
+      initialUserMessage: expandMsg,
+    });
+
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(create.mock.calls[0]![0].messages[0].content).toBe(expandMsg);
     expect(manifest.segments.some((s) => s.phase === "theta")).toBe(true);
   });
 
