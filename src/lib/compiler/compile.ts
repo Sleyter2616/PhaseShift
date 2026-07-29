@@ -23,11 +23,18 @@ import {
   COMPILER_PROMPT_V2_3,
   PROMPT_VERSION as PROMPT_VERSION_V2_3,
 } from "../compiler/prompt.v2.3";
+import {
+  COMPILER_PROMPT_V2_4,
+  PROMPT_VERSION as PROMPT_VERSION_V2_4,
+} from "../compiler/prompt.v2.4";
 import { stripCodeFences } from "../compiler/strip-fences";
 import {
   estimateManifestWallClockSec,
   formatLengthExpandRetryMessage,
   isCompileEstimateUnderfilled,
+  logCompileLengthTelemetry,
+  MAX_LENGTH_EXPAND_RETRIES,
+  summarizeThetaWordShortfalls,
 } from "./estimate-duration";
 import { validateManifest, type Manifest } from "../contracts/manifest";
 import { compilerInputForModel, type CompilerInput } from "../session/derive";
@@ -64,7 +71,7 @@ const RETRY_SUFFIX =
   "\n\nRe-emit ONLY the corrected JSON object. No explanation. No word counts.\nWhen fixing text-level errors, do not change any target_duration_sec value or the segment structure.";
 
 const LENGTH_EXPAND_SUFFIX =
-  "\n\nRe-emit ONLY the corrected JSON object. Expand theta spoken text toward each step's target_words. Keep target_duration_sec values and segment/step structure unchanged.";
+  "\n\nRe-emit ONLY the corrected JSON object. Expand underfilled theta steps to at least each step's target_words minimum with denser sensory detail. Do not add steps. Keep target_duration_sec values and segment/step structure unchanged.";
 
 function logCompileAttempt(
   attempt: number,
@@ -75,9 +82,9 @@ function logCompileAttempt(
   );
 }
 
-export type CompilerPromptVersion = "v1.4" | "v2.0" | "v2.1" | "v2.2" | "v2.3";
+export type CompilerPromptVersion = "v1.4" | "v2.0" | "v2.1" | "v2.2" | "v2.3" | "v2.4";
 
-/** Default v2.3; set COMPILER_PROMPT_VERSION to pin an older prompt. */
+/** Default v2.4; set COMPILER_PROMPT_VERSION to pin an older prompt. */
 export function resolveCompilerPromptVersion(
   override?: CompilerPromptVersion,
 ): CompilerPromptVersion {
@@ -87,7 +94,8 @@ export function resolveCompilerPromptVersion(
   if (env === "v2.0") return "v2.0";
   if (env === "v2.1") return "v2.1";
   if (env === "v2.2") return "v2.2";
-  return "v2.3";
+  if (env === "v2.3") return "v2.3";
+  return "v2.4";
 }
 
 function promptForVersion(version: CompilerPromptVersion): {
@@ -106,7 +114,10 @@ function promptForVersion(version: CompilerPromptVersion): {
   if (version === "v2.2") {
     return { system: COMPILER_PROMPT_V2_2, promptVersion: PROMPT_VERSION_V2_2 };
   }
-  return { system: COMPILER_PROMPT_V2_3, promptVersion: PROMPT_VERSION_V2_3 };
+  if (version === "v2.3") {
+    return { system: COMPILER_PROMPT_V2_3, promptVersion: PROMPT_VERSION_V2_3 };
+  }
+  return { system: COMPILER_PROMPT_V2_4, promptVersion: PROMPT_VERSION_V2_4 };
 }
 
 export async function compileManifest(
@@ -132,8 +143,12 @@ export async function compileManifest(
   let lastErrors: string[] = [];
   let lastRawText = "";
   const attempts: CompileAttemptInfo[] = [];
+  let lengthExpandRetries = 0;
+  let validationRetryUsed = false;
+  // Room for: initial + 1 validation retry + up to 2 length expands.
+  const maxAttempts = 1 + 1 + MAX_LENGTH_EXPAND_RETRIES;
 
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const response = await client.messages.create({
       model,
       max_tokens: 16_000,
@@ -165,7 +180,8 @@ export async function compileManifest(
       };
       attempts.push(attemptInfo);
       options?.onAttempt?.(attemptInfo);
-      if (attempt === 1) break;
+      if (validationRetryUsed) break;
+      validationRetryUsed = true;
       userMessage = `${JSON.stringify(compilerInputForModel(compilerInput))}\n\nVALIDATOR ERRORS (fix and re-emit):\n${lastErrors.join("\n")}${RETRY_SUFFIX}`;
       continue;
     }
@@ -199,7 +215,21 @@ export async function compileManifest(
       } else {
         const estimatedSec = estimateManifestWallClockSec(result.data);
         const targetSec = result.data.meta.total_duration_sec;
-        if (isCompileEstimateUnderfilled(estimatedSec, targetSec) && attempt === 0) {
+        const shortfalls = summarizeThetaWordShortfalls(
+          compilerInput.skeleton.theta_steps,
+          result.data.segments,
+        );
+        const underfilled = isCompileEstimateUnderfilled(estimatedSec, targetSec);
+
+        if (underfilled && lengthExpandRetries < MAX_LENGTH_EXPAND_RETRIES) {
+          logCompileLengthTelemetry({
+            estimatedSec,
+            targetSec,
+            attempt: attempt + 1,
+            lengthExpandRetries,
+            shortfalls,
+            accepting: false,
+          });
           const expandMessage = formatLengthExpandRetryMessage({
             estimatedSec,
             targetSec,
@@ -207,9 +237,9 @@ export async function compileManifest(
             segments: result.data.segments,
           });
           lastErrors = [
-            `compile length estimate ${estimatedSec.toFixed(1)}s < 92% of target ${targetSec}s`,
+            `compile length estimate ${estimatedSec.toFixed(1)}s < 97% of target ${targetSec}s`,
           ];
-          console.error(`length-gate: ${lastErrors[0]}`);
+          console.error(`length-gate: ${lastErrors[0]} (expand ${lengthExpandRetries + 1}/${MAX_LENGTH_EXPAND_RETRIES})`);
           const attemptInfo = {
             attempt: attempt + 1,
             validationErrors: lastErrors,
@@ -218,8 +248,23 @@ export async function compileManifest(
           };
           attempts.push(attemptInfo);
           options?.onAttempt?.(attemptInfo);
+          lengthExpandRetries += 1;
           userMessage = `${JSON.stringify(compilerInputForModel(compilerInput))}\n\n${expandMessage}${LENGTH_EXPAND_SUFFIX}`;
           continue;
+        }
+
+        logCompileLengthTelemetry({
+          estimatedSec,
+          targetSec,
+          attempt: attempt + 1,
+          lengthExpandRetries,
+          shortfalls,
+          accepting: true,
+        });
+        if (underfilled) {
+          console.error(
+            `length-gate: accepting underfill after ${lengthExpandRetries} expand retries; post-synth dwelling will fine-tune`,
+          );
         }
 
         const attemptInfo = {
@@ -247,9 +292,9 @@ export async function compileManifest(
     attempts.push(attemptInfo);
     options?.onAttempt?.(attemptInfo);
 
-    if (attempt === 0) {
-      userMessage = `${JSON.stringify(compilerInputForModel(compilerInput))}\n\nVALIDATOR ERRORS (fix and re-emit):\n${lastErrors.join("\n")}${RETRY_SUFFIX}`;
-    }
+    if (validationRetryUsed) break;
+    validationRetryUsed = true;
+    userMessage = `${JSON.stringify(compilerInputForModel(compilerInput))}\n\nVALIDATOR ERRORS (fix and re-emit):\n${lastErrors.join("\n")}${RETRY_SUFFIX}`;
   }
 
   throw new CompilerError(
@@ -260,11 +305,12 @@ export async function compileManifest(
   );
 }
 
-export const PROMPT_VERSION = PROMPT_VERSION_V2_3;
+export const PROMPT_VERSION = PROMPT_VERSION_V2_4;
 export {
   PROMPT_VERSION_V1_4,
   PROMPT_VERSION_V2,
   PROMPT_VERSION_V2_1,
   PROMPT_VERSION_V2_2,
   PROMPT_VERSION_V2_3,
+  PROMPT_VERSION_V2_4,
 };

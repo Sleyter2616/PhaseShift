@@ -6,7 +6,7 @@ import {
   formatCompilerFailureMessage,
   PROMPT_VERSION,
 } from "./compile";
-import { COMPILER_PROMPT_V2_3 } from "./prompt.v2.3";
+import { COMPILER_PROMPT_V2_4 } from "./prompt.v2.4";
 import type { CompilerInput } from "../session/derive";
 import { DEFAULT_ENTRAINMENT_PLAN } from "../session/derive";
 
@@ -83,7 +83,7 @@ function modelOwnedManifestDraft(
   const segments: Array<Record<string, unknown>> = [];
 
   if (budget.beta > 0) {
-    const betaWords = Math.ceil(((pacing.beta_wpm * budget.beta) / 60) * 0.9);
+    const betaWords = Math.ceil((pacing.beta_wpm * budget.beta) / 60);
     segments.push({
       phase: "beta",
       step: null,
@@ -97,8 +97,8 @@ function modelOwnedManifestDraft(
     });
   }
 
-  const alphaRemain = Math.max(30, Math.floor(budget.alpha * 0.3));
-  const alphaWords = Math.ceil(((pacing.alpha_wpm * alphaRemain) / 60) * 0.9);
+  const alphaRemain = Math.max(30, Math.floor(budget.alpha * 0.75));
+  const alphaWords = Math.ceil((pacing.alpha_wpm * alphaRemain) / 60);
   segments.push({
     phase: "alpha",
     step: null,
@@ -123,11 +123,11 @@ function modelOwnedManifestDraft(
       pause_after_ms: 500,
       text: options?.sparseTheta
         ? "I hold a thin scene."
-        : padWords(Math.ceil(timing.target_words * 0.9)),
+        : padWords(timing.target_words),
     });
   }
 
-  const gammaWords = Math.ceil(((pacing.gamma_wpm * budget.gamma) / 60) * 0.5);
+  const gammaWords = Math.ceil((pacing.gamma_wpm * budget.gamma) / 60);
   segments.push({
     phase: "gamma",
     step: null,
@@ -163,11 +163,11 @@ describe("compileManifest", () => {
     vi.unstubAllEnvs();
   });
 
-  it("defaults to prompt v2.3", () => {
-    expect(PROMPT_VERSION).toBe("v2.3");
+  it("defaults to prompt v2.4", () => {
+    expect(PROMPT_VERSION).toBe("v2.4");
   });
 
-  it("sends the v2.3 system prompt and skeleton in the user message", async () => {
+  it("sends the v2.4 system prompt and skeleton in the user message", async () => {
     const create = vi.fn().mockResolvedValue({
       stop_reason: "end_turn",
       usage: { input_tokens: 1, output_tokens: 1 },
@@ -182,7 +182,7 @@ describe("compileManifest", () => {
       system: string;
       messages: [{ content: string }];
     };
-    expect(firstCall.system).toBe(COMPILER_PROMPT_V2_3);
+    expect(firstCall.system).toBe(COMPILER_PROMPT_V2_4);
     const user = JSON.parse(firstCall.messages[0]!.content) as {
       skeleton: {
         length_min: number;
@@ -244,7 +244,7 @@ describe("compileManifest", () => {
     },
   );
 
-  it("retries once when compile-time length estimate is under 92%", async () => {
+  it("retries when compile-time length estimate is under 97%", async () => {
     const input = buildCompilerInput(15);
     const sparse = modelOwnedManifestDraft(input, { sparseTheta: true });
     const filled = modelOwnedManifestDraft(input);
@@ -268,6 +268,29 @@ describe("compileManifest", () => {
     expect(create).toHaveBeenCalledTimes(2);
     const retryUser = create.mock.calls[1]![0].messages[0].content as string;
     expect(retryUser).toContain("LENGTH UNDERFILL");
+    expect(retryUser).toContain("target is 15");
+    expect(retryUser).toContain("under their word budgets");
+    expect(retryUser).toContain("Do not add steps");
+    expect(manifest.segments.some((s) => s.phase === "theta")).toBe(true);
+  });
+
+  it("allows a second length-expand retry before accepting underfill", async () => {
+    const input = buildCompilerInput(15);
+    const sparse = modelOwnedManifestDraft(input, { sparseTheta: true });
+    const create = vi.fn().mockResolvedValue({
+      stop_reason: "end_turn",
+      usage: { input_tokens: 10, output_tokens: 100 },
+      content: [{ type: "text", text: JSON.stringify(sparse) }],
+    });
+
+    const manifest = await compileManifest(input, {
+      client: { messages: { create } } as never,
+    });
+
+    // initial + 2 expand retries, then accept sparse
+    expect(create).toHaveBeenCalledTimes(3);
+    expect(create.mock.calls[1]![0].messages[0].content).toContain("LENGTH UNDERFILL");
+    expect(create.mock.calls[2]![0].messages[0].content).toContain("LENGTH UNDERFILL");
     expect(manifest.segments.some((s) => s.phase === "theta")).toBe(true);
   });
 
