@@ -205,10 +205,12 @@ export function VoiceOnboarding({
   if (readyVoiceId && !showRecorder) {
     return (
       <div className="space-y-4">
-        <p className="text-sm text-green-800">Your voice clone is ready.</p>
-        <p className="text-sm text-neutral-700">
+        <p className="text-sm text-[var(--accent-sand)]">Your voice clone is ready.</p>
+        <p className="text-sm text-[var(--text-mid)]">
           ElevenLabs voice ID:{" "}
-          <code className="rounded bg-neutral-100 px-1 font-mono text-xs">{readyVoiceId}</code>
+          <code className="rounded border border-[var(--setup-border)] bg-[var(--setup-panel)] px-1.5 py-0.5 font-mono text-xs text-[var(--text-hi)]">
+            {readyVoiceId}
+          </code>
         </p>
         <button
           type="button"
@@ -219,7 +221,7 @@ export function VoiceOnboarding({
             setRecordingFormat(null);
             setElapsedSec(0);
           }}
-          className="rounded border border-neutral-300 px-4 py-2 text-sm"
+          className="btn-ghost"
         >
           Record a new sample
         </button>
@@ -230,7 +232,7 @@ export function VoiceOnboarding({
   if (!consentConfirmed) {
     return (
       <div className="space-y-4">
-        <div className="space-y-2 text-sm text-neutral-700">
+        <div className="space-y-2 text-sm text-[var(--text-mid)]">
           <p>
             PhaseShift clones only your own voice for your account. Samples are recorded in-app —
             no file uploads.
@@ -240,27 +242,32 @@ export function VoiceOnboarding({
             personal guided sessions only.
           </p>
         </div>
-        <label className="flex items-start gap-2 text-sm">
+        <label className="flex items-start gap-2 text-sm text-[var(--text-hi)]">
           <input
             type="checkbox"
             checked={consentChecked}
             onChange={(event) => setConsentChecked(event.target.checked)}
-            className="mt-1"
+            className="mt-1 accent-[var(--accent-sand)]"
           />
           <span>
             I confirm this is my own voice and I consent to in-app cloning for my account. See{" "}
-            <a href="/voice-consent" className="underline underline-offset-2" target="_blank" rel="noreferrer">
+            <a
+              href="/voice-consent"
+              className="btn-link"
+              target="_blank"
+              rel="noreferrer"
+            >
               voice consent
             </a>
             .
           </span>
         </label>
-        {consentError ? <p className="text-sm text-red-700">{consentError}</p> : null}
+        {consentError ? <p className="text-error">{consentError}</p> : null}
         <button
           type="button"
           disabled={!consentChecked || consentPending}
           onClick={() => void handleConsent()}
-          className="rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          className="btn-clay"
         >
           {consentPending ? "Saving…" : "Accept and continue"}
         </button>
@@ -271,7 +278,7 @@ export function VoiceOnboarding({
   return (
     <div className="space-y-5">
       {status === "failed" ? (
-        <p className="text-sm text-red-700">
+        <p className="text-error">
           Your last clone attempt failed. Record a new sample below or retry from your stored
           recording.
         </p>
@@ -282,28 +289,28 @@ export function VoiceOnboarding({
           type="button"
           disabled={submitPending}
           onClick={() => void handleRetryStored()}
-          className="rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          className="btn-clay"
         >
           {submitPending ? "Retrying…" : "Retry from stored sample"}
         </button>
       ) : null}
 
-      <div className="rounded border border-neutral-200 bg-neutral-50 p-4 text-sm leading-relaxed">
+      <div className="rounded-[var(--radius)] border border-[var(--setup-border)] bg-[var(--setup-panel)] p-4 text-sm leading-relaxed text-[var(--text-hi)]">
         {VOICE_CLONE_READING_PASSAGE}
       </div>
 
-      <p className="text-sm text-neutral-600">
+      <p className="text-sm text-[var(--text-mid)]">
         Target ~{VOICE_SAMPLE_TARGET_SEC}s of clear speech (minimum {VOICE_SAMPLE_MIN_SEC}s, up to{" "}
         {VOICE_SAMPLE_MAX_SEC}s). Longer samples usually improve clone fidelity — read through the
         passage again if you want a fuller capture.
       </p>
 
-      <p className="font-mono text-sm">
+      <p className="font-mono text-sm text-[var(--text-hi)]">
         {elapsedSec}s / {VOICE_SAMPLE_MAX_SEC}s max
       </p>
 
       {recordingFormat ? (
-        <p className="font-mono text-xs text-neutral-600">
+        <p className="font-mono text-xs text-[var(--text-lo)]">
           Recorded as {recordingFormat.mimeType || "unknown"} @{" "}
           {Math.round(recordingFormat.audioBitsPerSecond / 1000)} kbps
           {recordingFormat.audioBitsPerSecond === VOICE_RECORDING_BITS_PER_SECOND
@@ -312,23 +319,19 @@ export function VoiceOnboarding({
         </p>
       ) : null}
 
-      {recordError ? <p className="text-sm text-red-700">{recordError}</p> : null}
+      {recordError ? <p className="text-error">{recordError}</p> : null}
 
       <div className="flex flex-wrap gap-3">
         {!recording ? (
           <button
             type="button"
             onClick={() => void startRecording()}
-            className="rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-white"
+            className="btn-clay"
           >
             {audioBlob ? "Re-record" : "Start recording"}
           </button>
         ) : (
-          <button
-            type="button"
-            onClick={stopRecording}
-            className="rounded border border-neutral-300 px-4 py-2 text-sm"
-          >
+          <button type="button" onClick={stopRecording} className="btn-ghost">
             Stop recording
           </button>
         )}
@@ -337,17 +340,17 @@ export function VoiceOnboarding({
             type="button"
             disabled={submitPending}
             onClick={() => void handleSubmitSample()}
-            className="rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            className="btn-clay"
           >
             {submitPending ? "Cloning…" : "Submit voice sample"}
           </button>
         ) : null}
       </div>
 
-      {submitError ? <p className="text-sm text-red-700">{submitError}</p> : null}
+      {submitError ? <p className="text-error">{submitError}</p> : null}
 
       {status === "pending" && !audioBlob ? (
-        <p className="text-xs text-neutral-500">Status: pending clone</p>
+        <p className="text-xs text-[var(--text-lo)]">Status: pending clone</p>
       ) : null}
     </div>
   );
