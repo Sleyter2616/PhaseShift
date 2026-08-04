@@ -623,7 +623,7 @@ Onboard (/welcome) -> optional welcome topup -> Intake wizard -> generation
 | Auth, DB, Realtime | Supabase         | Realtime channel per script for synthesis progress                                                                                                                                                                                               |
 | Audio storage      | Supabase Storage | Private bucket, signed URLs, Smart CDN; user voice assets under `{user_id}/...`, shared stock assets under `shared/...`; TTL defaults to 24h and service worker refreshes signed URLs before expiry; body caching makes repeat plays zero-egress |
 | Billing            | Stripe           | Subscriptions + minute top-ups; webhooks call `grant_subscription_minutes` / `grant_topup_minutes` via service role. Optional **welcome grant** (env-toggled) credits topup on first onboarding.                                              |
-| Errors             | Sentry           | App Router instrumentation (`@sentry/nextjs`); optional locally via `SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN`                                                                                                                                      |
+| Errors             | Sentry           | App Router instrumentation (`@sentry/nextjs`); browser events tunnel via same-origin `/monitoring` (`tunnelRoute`) to bypass ad-blocker CORS; optional locally via `SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN`                                      |
 
 
 Fixed infra at small scale: Vercel Pro $20 + Supabase Pro $25 + Inngest $0-20, roughly $50-70/month before TTS. Secrets (Anthropic, ElevenLabs, Stripe, Sentry) live server-side only (or public DSN only where required).
