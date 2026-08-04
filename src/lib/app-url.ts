@@ -7,8 +7,19 @@ export function appBaseUrl(
   return raw.replace(/\/$/, "");
 }
 
+/**
+ * Absolute URL for Supabase Auth password-reset redirectTo.
+ * Always ends with `/reset-password` — never the site root.
+ * Pass `origin` (e.g. `window.location.origin`) from the browser so emails
+ * target the live host even if `NEXT_PUBLIC_APP_URL` is missing at runtime.
+ */
 export function passwordResetRedirectTo(
   env: Record<string, string | undefined> = process.env,
+  options?: { origin?: string },
 ): string {
-  return `${appBaseUrl(env)}/reset-password`;
+  const fromOrigin = options?.origin?.trim().replace(/\/$/, "");
+  const base = fromOrigin || appBaseUrl(env);
+  // Guard against callers accidentally passing a bare path or trailing path.
+  const originOnly = base.replace(/\/reset-password\/?$/, "");
+  return `${originOnly}/reset-password`;
 }
