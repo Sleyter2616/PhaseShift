@@ -27,6 +27,21 @@ export async function createSession(scriptId: string): Promise<{ sessionId: stri
   return { sessionId: data.id };
 }
 
+/** Idempotent: set primer_seen_at once when the first-session primer is dismissed. */
+export async function markPrimerSeen(): Promise<void> {
+  const { supabase, user } = await requireSessionUser();
+
+  const { error } = await supabase
+    .from("profiles")
+    .update({ primer_seen_at: new Date().toISOString() })
+    .eq("id", user.id)
+    .is("primer_seen_at", null);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
 export async function completeSession(input: {
   sessionId: string;
   progressSec: number;

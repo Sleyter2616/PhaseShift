@@ -24,6 +24,9 @@ export function SetupHeaderBar({ email }: { email: string }) {
           <Link href="/voice" className={navLinkClass}>
             Voice
           </Link>
+          <Link href="/how-to" className={navLinkClass}>
+            How to use
+          </Link>
           <Link href="/billing" className={navLinkClass}>
             Billing
           </Link>
