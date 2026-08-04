@@ -73,9 +73,10 @@ export default async function BillingPage() {
             </div>
           </dl>
           <p className="mt-3 text-sm text-[var(--text-mid)]">
-            Subscription minutes reset{" "}
-            {formatPeriodEnd(profile?.subscription_minutes_reset_at ?? null)}. Top-up minutes never
-            expire.
+            {profile?.subscription_minutes_reset_at
+              ? `Subscription minutes reset ${formatPeriodEnd(profile.subscription_minutes_reset_at)}.`
+              : "Subscription minutes reset each billing cycle when subscribed."}{" "}
+            Top-up minutes never expire.
           </p>
         </section>
 

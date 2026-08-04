@@ -1,10 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { ChoiceControl } from "@/components/choice-control";
 import { Mark } from "@/components/mark";
 import { SessionField } from "@/components/session-field";
 import { PhaseJourney, SessionPulse } from "@/components/session-pulse";
+import { SessionPrimerContent } from "@/components/session-primer";
 import type { PlaybackManifest } from "@/lib/playback/manifest";
 import { EntrainmentEngine, type EntrainmentMode } from "@/lib/audio/engine";
 import { JitDecodeWindow } from "@/lib/audio/decode-window";
@@ -30,9 +32,10 @@ import {
   voicesDueInWindow,
 } from "@/lib/audio/scheduler";
 import { isTestGenerationProvider } from "@/lib/synthesis/provenance";
-import { completeSession, createSession } from "./actions";
+import { completeSession, createSession, markPrimerSeen } from "./actions";
 
 type PlayerStage =
+  | "primer"
   | "prebegin"
   | "loading"
   | "readyToPlay"
@@ -43,6 +46,8 @@ type PlayerStage =
 
 interface SessionPlayerProps {
   manifest: PlaybackManifest;
+  /** When true, show the first-session how-to gate before safety prebegin. */
+  needsPrimer?: boolean;
 }
 
 interface DebugSnapshot {
@@ -163,7 +168,7 @@ function useDebugStripEnabled(): boolean {
   return IS_DEV && queryEnabled;
 }
 
-export function SessionPlayer({ manifest }: SessionPlayerProps) {
+export function SessionPlayer({ manifest, needsPrimer = false }: SessionPlayerProps) {
   const isTestGeneration = isTestGenerationProvider(manifest.meta.provider);
   const schedule = useMemo(() => computeSegmentSchedule(manifest.segments), [manifest.segments]);
   const glideBoundaries = useMemo(
@@ -178,7 +183,8 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
   const initialBeatHz =
     manifest.meta.entrainment_plan[0]?.hz ?? manifest.segments[0]?.entrainment_hz ?? 10;
 
-  const [stage, setStage] = useState<PlayerStage>("prebegin");
+  const [stage, setStage] = useState<PlayerStage>(needsPrimer ? "primer" : "prebegin");
+  const [primerPending, setPrimerPending] = useState(false);
   const [mode, setMode] = useState<EntrainmentMode>(manifest.meta.entrainment_mode);
   const [voiceGain, setVoiceGain] = useState(VOICE_GAIN_DEFAULT);
   const [toneGain, setToneGain] = useState(TONE_GAIN_DEFAULT);
@@ -715,13 +721,42 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
   const debugPad =
     debugEnabled && (stage === "readyToPlay" || stage === "playing" || stage === "paused");
 
+  async function dismissPrimer() {
+    setPrimerPending(true);
+    setError(null);
+    try {
+      await markPrimerSeen();
+      setStage("prebegin");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not continue");
+      setPrimerPending(false);
+    }
+  }
+
+  if (stage === "primer") {
+    return (
+      <SessionField phase="alpha" className="items-center justify-center px-4 py-10">
+        <div className="session-column w-full max-w-md space-y-6">
+          <Mark size={32} className="mx-auto" />
+          <SessionPrimerContent
+            actionLabel="I'm ready"
+            actionPending={primerPending}
+            onAction={() => void dismissPrimer()}
+            actionClassName="btn-sand w-full py-3 text-base"
+          />
+          {error ? <p className="text-sm text-[var(--color-error)]">{error}</p> : null}
+        </div>
+      </SessionField>
+    );
+  }
+
   if (stage === "prebegin") {
     return (
       <SessionField phase="alpha" className="items-center justify-center px-4 py-10">
         <div className="session-column w-full max-w-md space-y-8">
           <div className="text-center">
             <Mark size={32} className="mx-auto mb-4" />
-            <h1 className="font-display text-2xl font-normal">Before you begin</h1>
+            <h1 className="font-display text-2xl font-normal">Safety</h1>
           </div>
           <ul className="space-y-4 text-sm leading-relaxed text-[var(--session-mid)]">
             <li>
@@ -751,6 +786,11 @@ export function SessionPlayer({ manifest }: SessionPlayerProps) {
           >
             Begin session
           </button>
+          <p className="text-center">
+            <Link href="/how-to" className="btn-link text-[var(--session-mid)]">
+              How to use
+            </Link>
+          </p>
         </div>
       </SessionField>
     );

@@ -4,6 +4,7 @@ import { getSessionUser } from "@/lib/auth/session";
 import { userOwnsScript } from "@/lib/auth/ownership";
 import { getServiceClient } from "@/lib/db/service-client";
 import { loadPlaybackManifest } from "@/lib/playback/manifest";
+import { needsSessionPrimer } from "@/lib/session/primer";
 import { createClient } from "@/lib/supabase/server";
 import { SessionPlayer } from "./player";
 
@@ -21,10 +22,18 @@ export default async function SessionPage({ params }: PageProps) {
     notFound();
   }
 
-  const manifest = await loadPlaybackManifest(getServiceClient(), scriptId);
+  const [{ data: profile, error: profileError }, manifest] = await Promise.all([
+    userSupabase.from("profiles").select("primer_seen_at").eq("id", user.id).maybeSingle(),
+    loadPlaybackManifest(getServiceClient(), scriptId),
+  ]);
+
   if (!manifest) {
     notFound();
   }
+
+  // Fail open if the column is not migrated yet; otherwise show until dismissed.
+  const needsPrimer =
+    profileError == null && profile != null && needsSessionPrimer(profile.primer_seen_at);
 
   const notReady = (
     <SessionField phase="alpha" className="items-center justify-center px-4 py-8">
@@ -56,5 +65,5 @@ export default async function SessionPage({ params }: PageProps) {
     ? notReady
     : manifest.segments.some((segment) => !segment.signedUrl)
       ? missingAudio
-      : <SessionPlayer manifest={manifest} />;
+      : <SessionPlayer manifest={manifest} needsPrimer={needsPrimer} />;
 }

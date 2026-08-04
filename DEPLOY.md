@@ -48,7 +48,7 @@ In the prod Supabase project → **Authentication → URL configuration**:
    - `https://your-domain.com/auth/callback` (if used)
    - `https://your-domain.com/**` or the exact paths your app uses after magic-link / OAuth
 
-Apply migrations through `0012_minutes.sql` on the prod database before serving traffic.
+Apply migrations through `0013_primer_seen_at.sql` on the prod database before serving traffic.
 
 ## Inngest Cloud
 

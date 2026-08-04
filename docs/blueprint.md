@@ -230,6 +230,8 @@ create table profiles (
   subscription_minutes integer not null default 0 check (subscription_minutes >= 0),
   subscription_minutes_reset_at timestamptz,
   topup_minutes integer not null default 0 check (topup_minutes >= 0),
+  onboarded_at timestamptz,               -- set when /welcome completes
+  primer_seen_at timestamptz,             -- set when first-session how-to is dismissed
   credit_balance numeric not null default 0 check (credit_balance >= 0), -- retired from generation
   created_at timestamptz default now()
 );
@@ -595,16 +597,16 @@ State progression timeline (45-min full arc; shorter lengths shrink theta and ma
 User journey (first run + the loop):
 
 ```
-Onboard -> record 90s voice sample in-app -> instant clone ready
-   -> Intake wizard -> generation (~60-90s, progressive)
-   -> Session 1 ... daily playback (cached, offline)
+Onboard (/welcome) -> optional welcome topup -> Intake wizard -> generation
+   -> First session: primer ("Before you begin") once -> safety -> playback
+   -> daily playback (cached, offline); "How to use" in header /how-to for revisit
    -> Recognition Log entries accumulate
    -> 3+ matched features -> Re-Triangulate CTA -> goal_version v2
    -> hash-diff regen (~40% of chars) -> Sessions continue
    -> Convergence -> goal marked converged -> next goal
 ```
 
-The generation pipeline and audio node graphs are in Sections 1.1 and 1.3.
+**First-session primer.** Before the first playback, users who have not dismissed it (`profiles.primer_seen_at` null) see a short how-to gate: headphones, quiet place, sit/lie eyes closed (no driving), let it wash over you. CTA: "I'm ready" → marks `primer_seen_at` and continues to the existing safety `prebegin`. Revisit anytime via **How to use** in the setup header (`/how-to`) or a link on the safety screen.
 
 ---
 
@@ -687,6 +689,7 @@ Capacity planning still tracks ElevenLabs character spend separately from user-f
 
 - **v0.5-1 (landed through ~1.12 / welcome grant):** Server-owned skeleton; length ladder 10/15/30/45; step model B; posture; self-paced breath; exact length via theta dwelling; fail-open compile-attempt-2 as its own Inngest step; person-agreement script-qa; tone mix cap; prompt **v2.5**; minutes = budgeted length × voice multiplier; welcome grant (env toggle); stuck-generation reaper cron.
 - **Wizard length + reuse (landed):** length picker + prior-session answer reuse. Contiguous middle-step picker UI still deferred (API ready).
+- **First-session primer (landed):** one-time how-to gate before first playback (`primer_seen_at`); revisit via `/how-to`.
 - Later v0.5: Recognition Log / re-triangulate polish; regen copy-through mode (D8).
 
 **v1:** Offline render + true background playback; Freeform sequencing; Practitioner surfaces beyond allotment.

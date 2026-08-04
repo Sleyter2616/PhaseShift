@@ -9,6 +9,7 @@ See the full execution plan in [`docs/blueprint.md`](docs/blueprint.md). Agent o
 ## Features (current)
 
 - **Variable session lengths:** 10 / 15 / 30 / 45 minutes (40 retired). Phase budgets are **server-computed** and sum to `length × 60`; delivered length matches via distributed theta dwelling silence. Billing = exact budgeted length × voice multiplier.
+- **First-session primer:** calm how-to once before first playback; revisit via **How to use** (`/how-to`).
 - **Step model B:** Visualize (1) + Closure (12) bookends; contiguous middle steps from 2..11, count capped by length. Wizard length picker + prior-session reuse; middle-step picker UI still deferred.
 - **Self-paced breathing:** session states the 4/2/8/2 pattern once, then guides over the user's own pacing (not live breath cueing). Countdown = numbers only into silence.
 - **Compiler prompt v2.5** (default): skeleton givens, depth-by-length, self-paced breath, word-budget minimums, person-aware intake. Pin older via `COMPILER_PROMPT_VERSION` (incl. `v1.4`).
@@ -35,7 +36,7 @@ See the full execution plan in [`docs/blueprint.md`](docs/blueprint.md). Agent o
 
 - Node.js ≥ 22 (`nvm use`)
 - pnpm 9+
-- Hosted Supabase project with migrations through `0012_minutes.sql` applied (conductor applies migrations — see `AGENTS.md`)
+- Hosted Supabase project with migrations through `0013_primer_seen_at.sql` applied (conductor applies migrations — see `AGENTS.md`)
 - [Anthropic API key](https://console.anthropic.com/)
 - [ElevenLabs API key](https://elevenlabs.io/) (optional when `TTS_PROVIDER=selfhost`)
 - [Inngest dev server](https://www.inngest.com/docs/local-development)
@@ -78,7 +79,7 @@ pnpm typecheck && pnpm lint && pnpm test
 
 ### 2. Apply migrations
 
-Ask the conductor to apply `supabase/migrations/` through `0012` on your hosted project. Agents do not apply schema directly (`AGENTS.md`).
+Ask the conductor to apply `supabase/migrations/` through `0013` on your hosted project. Agents do not apply schema directly (`AGENTS.md`).
 
 ### 3. Seed dev user
 
@@ -192,7 +193,7 @@ src/
   lib/sentry/             capture helpers
   inngest/functions/      generate-script, synthesize-segment, stuck-generation-reaper
 scripts/                  seed, verify, minutes-concurrency
-supabase/migrations/      0001–0012
+supabase/migrations/      0001–0013
 AGENTS.md                 Coding-agent operating rules
 ```
 
