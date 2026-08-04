@@ -13,6 +13,7 @@ export function ResetPasswordForm() {
   const [pending, setPending] = useState(false);
   const [sessionReady, setSessionReady] = useState(false);
   const [checking, setChecking] = useState(true);
+  const [linkError, setLinkError] = useState<string | null>(null);
 
   useEffect(() => {
     const supabase = createClient();
@@ -20,24 +21,71 @@ export function ResetPasswordForm() {
 
     async function establishRecoverySession() {
       const params = new URLSearchParams(window.location.search);
+      const code = params.get("code");
       const tokenHash = params.get("token_hash");
       const type = params.get("type");
+      const authError = params.get("error_description") ?? params.get("error");
 
+      if (authError) {
+        if (!cancelled) {
+          setLinkError(authError);
+          setSessionReady(false);
+          setChecking(false);
+        }
+        return;
+      }
+
+      // PKCE (current Supabase email links): ?code=<uuid>
+      if (code) {
+        const { error: exchangeError } =
+          await supabase.auth.exchangeCodeForSession(code);
+        if (!cancelled) {
+          if (exchangeError) {
+            setLinkError(
+              exchangeError.message ||
+                "This reset link is invalid or has expired.",
+            );
+            setSessionReady(false);
+          } else {
+            setSessionReady(true);
+            // Drop one-time code from the URL so refresh does not re-exchange.
+            window.history.replaceState({}, "", "/reset-password");
+          }
+          setChecking(false);
+        }
+        return;
+      }
+
+      // Legacy email format: ?token_hash=…&type=recovery
       if (tokenHash && type === "recovery") {
         const { error: verifyError } = await supabase.auth.verifyOtp({
           type: "recovery",
           token_hash: tokenHash,
         });
-        if (!cancelled && !verifyError) {
-          setSessionReady(true);
+        if (!cancelled) {
+          if (verifyError) {
+            setLinkError(
+              verifyError.message ||
+                "This reset link is invalid or has expired.",
+            );
+            setSessionReady(false);
+          } else {
+            setSessionReady(true);
+            window.history.replaceState({}, "", "/reset-password");
+          }
           setChecking(false);
-          return;
         }
+        return;
       }
 
       const { data } = await supabase.auth.getSession();
       if (!cancelled) {
         setSessionReady(Boolean(data.session));
+        if (!data.session) {
+          setLinkError(
+            "This reset link is invalid or has expired. Request a new one and try again.",
+          );
+        }
         setChecking(false);
       }
     }
@@ -50,6 +98,7 @@ export function ResetPasswordForm() {
       if (event === "PASSWORD_RECOVERY" || event === "SIGNED_IN") {
         setSessionReady(true);
         setChecking(false);
+        setLinkError(null);
       }
     });
 
@@ -112,7 +161,8 @@ export function ResetPasswordForm() {
     return (
       <div className="space-y-4">
         <p className="text-sm leading-relaxed text-[var(--text-mid)]">
-          This reset link is invalid or has expired. Request a new one and try again.
+          {linkError ??
+            "This reset link is invalid or has expired. Request a new one and try again."}
         </p>
         <p className="text-center text-sm text-[var(--text-mid)]">
           <Link href="/forgot-password" className="btn-link">

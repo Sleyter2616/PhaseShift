@@ -43,9 +43,9 @@ Optional: `INNGEST_SERVE_ORIGIN` if Inngest should sync against a custom domain 
 
 In the prod Supabase project → **Authentication → URL configuration**:
 
-1. **Site URL** — `https://phaseshift.app` (same as `NEXT_PUBLIC_APP_URL`).
+1. **Site URL** — `https://phaseshift.app` (same as `NEXT_PUBLIC_APP_URL`). Site URL is the **fallback origin** only — it must not replace the `/reset-password` path on recovery links.
 2. **Redirect URLs** — include at least:
-   - `https://phaseshift.app/reset-password` (**required** for password reset; without this, recovery links are rejected)
+   - `https://phaseshift.app/reset-password` (**required** for password reset; without this, Supabase falls back to Site URL and the link lands on `/?code=…`)
    - `https://phaseshift.app/auth/callback` (if used)
    - `https://phaseshift.app/**` or the exact paths your app uses after magic-link / OAuth
 
