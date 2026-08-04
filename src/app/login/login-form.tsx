@@ -97,6 +97,13 @@ export function LoginForm() {
           className="setup-input mt-1.5"
         />
       </label>
+      {mode === "signin" ? (
+        <p className="-mt-2 text-right text-sm">
+          <Link href="/forgot-password" className="btn-link">
+            Forgot password?
+          </Link>
+        </p>
+      ) : null}
       {mode === "signup" ? (
         <>
           <label className="setup-label">
