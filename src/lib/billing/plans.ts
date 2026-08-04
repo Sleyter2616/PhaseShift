@@ -4,6 +4,7 @@ import {
   TOPUP_PRICE_PER_CREDIT_USD,
 } from "../costs";
 import { DEFAULT_CLONE_ELEVENLABS_MODEL_ID, DEFAULT_ELEVENLABS_MODEL_ID } from "../pipeline/synthesis-identity";
+import { appBaseUrl as resolveAppBaseUrl } from "../app-url";
 
 /** §5 — single credit top-up (Flash generation up to 30k chars). */
 export const TOP_UP = {
@@ -79,5 +80,5 @@ export function stripeTopupPriceId(): string {
 }
 
 export function appBaseUrl(): string {
-  return process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  return resolveAppBaseUrl();
 }

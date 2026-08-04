@@ -8,7 +8,7 @@ Set these on the Vercel project (**Production**). Leave secrets empty in git; ne
 
 | Variable | Notes |
 | -------- | ----- |
-| `NEXT_PUBLIC_APP_URL` | Canonical prod origin, e.g. `https://your-domain.com` (no trailing slash) |
+| `NEXT_PUBLIC_APP_URL` | Canonical prod origin: **`https://phaseshift.app`** (no trailing slash). Used for Stripe return URLs and Auth password-reset `redirectTo`. |
 | `NEXT_PUBLIC_SUPABASE_URL` | Prod Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Prod anon key |
 | `SUPABASE_SERVICE_ROLE_KEY` | Prod service role (server-only) |
@@ -43,10 +43,11 @@ Optional: `INNGEST_SERVE_ORIGIN` if Inngest should sync against a custom domain 
 
 In the prod Supabase project → **Authentication → URL configuration**:
 
-1. **Site URL** — `https://your-domain.com` (same as `NEXT_PUBLIC_APP_URL`).
+1. **Site URL** — `https://phaseshift.app` (same as `NEXT_PUBLIC_APP_URL`).
 2. **Redirect URLs** — include at least:
-   - `https://your-domain.com/auth/callback` (if used)
-   - `https://your-domain.com/**` or the exact paths your app uses after magic-link / OAuth
+   - `https://phaseshift.app/reset-password` (**required** for password reset; without this, recovery links are rejected)
+   - `https://phaseshift.app/auth/callback` (if used)
+   - `https://phaseshift.app/**` or the exact paths your app uses after magic-link / OAuth
 
 Apply migrations through `0013_primer_seen_at.sql` on the prod database before serving traffic.
 
@@ -54,7 +55,7 @@ Apply migrations through `0013_primer_seen_at.sql` on the prod database before s
 
 1. Deploy the Next.js app so `/api/inngest` is reachable.
 2. Prefer the [Inngest Vercel integration](https://www.inngest.com/docs/deploy/vercel) (sets `INNGEST_EVENT_KEY` / `INNGEST_SIGNING_KEY` and syncs on deploy), **or** create an app in the Inngest dashboard and paste the keys into Vercel manually.
-3. Confirm the serve URL is `https://your-domain.com/api/inngest` (or set `INNGEST_SERVE_ORIGIN`).
+3. Confirm the serve URL is `https://phaseshift.app/api/inngest` (or set `INNGEST_SERVE_ORIGIN`).
 4. Sync / deploy once and verify functions `generate-script`, `synthesize-segment`, and `stuck-generation-reaper` (cron every 5 min) appear in the Inngest UI.
 
 Local reminder: use `INNGEST_DEV=1` and `npx inngest-cli@latest dev -u http://localhost:3000/api/inngest` — never point local at prod keys.
@@ -62,7 +63,7 @@ Local reminder: use `INNGEST_DEV=1` and `npx inngest-cli@latest dev -u http://lo
 ## Stripe webhook (prod)
 
 1. Stripe Dashboard → **Developers → Webhooks** (live mode).
-2. Add endpoint: `https://your-domain.com/api/webhooks/stripe`.
+2. Add endpoint: `https://phaseshift.app/api/webhooks/stripe`.
 3. Subscribe to the events the app handles (checkout / subscription / invoice — see `src/lib/billing/webhook.ts`).
 4. Copy the endpoint **Signing secret** into Vercel as `STRIPE_WEBHOOK_SECRET`.
 5. Ensure live Price IDs match `STRIPE_PRICE_*` and `STRIPE_SECRET_KEY` is `sk_live_…`.

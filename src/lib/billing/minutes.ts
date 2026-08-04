@@ -3,6 +3,8 @@
  * Credits in plans.ts remain for legacy references; generation path uses minutes.
  */
 
+import { appBaseUrl as resolveAppBaseUrl } from "../app-url";
+
 export const SESSION_LENGTH_MINUTES = 30;
 
 /** stock = 1× length; own_voice = 2× length. */
@@ -158,5 +160,5 @@ export function planRefundBreakdown(
 }
 
 export function appBaseUrl(env: NodeJS.ProcessEnv = process.env): string {
-  return env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  return resolveAppBaseUrl(env);
 }
