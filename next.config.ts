@@ -13,6 +13,9 @@ export default withSentryConfig(nextConfig, {
   authToken,
   silent: true,
   widenClientFileUpload: true,
+  // Same-origin tunnel so ad-blockers/privacy extensions cannot CORS-block
+  // browser ingest (client posts to /monitoring; Next rewrites to Sentry).
+  tunnelRoute: "/monitoring",
   // Source maps upload only when a build-time auth token is present.
   sourcemaps: {
     disable: !authToken,
