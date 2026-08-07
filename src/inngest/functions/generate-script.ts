@@ -3,8 +3,6 @@ import { inngest } from "../client";
 import { getServiceClient } from "@/lib/db/service-client";
 import {
   CompilerError,
-  CompileStepTimeoutError,
-  compileManifestWithBudget,
   formatCompilerFailureMessage,
 } from "@/lib/compiler/compile";
 import {
@@ -13,6 +11,10 @@ import {
   runCompileAttempt2FailOpen,
   shouldRunCompileAttempt2,
 } from "@/lib/pipeline/compile-length-steps";
+import {
+  runCompilePrimaryAttempt,
+  shouldRetryCompileOnTimeout,
+} from "@/lib/pipeline/compile-timeout-retry";
 import { applyDedupeHits, linkPendingSegmentsFromAudioCache, planSegmentDedupe } from "@/lib/pipeline/dedupe-plan";
 import { deriveSegmentRows } from "@/lib/pipeline/segment-rows";
 import { reconcileSegments } from "@/lib/pipeline/reconcile-persist";
@@ -62,23 +64,50 @@ export const generateScript = inngest.createFunction(
         return loadScriptSynthesisIdentity(getServiceClient(), scriptCtx);
       });
 
-      // Each Claude compile is its own step → fresh ~300s budget.
-      // Never stack two compiles in one invocation (FUNCTION_INVOCATION_TIMEOUT).
-      const attempt1 = await step.run("compile-attempt-1", async () => {
+      // Each Claude compile is its own step → fresh ~300s budget (route maxDuration=300).
+      // Soft budget is COMPILE_STEP_BUDGET_MS (~270s). Never stack two compiles in one
+      // invocation (FUNCTION_INVOCATION_TIMEOUT). Soft-timeout → one separate-step retry.
+      const attempt1Result = await step.run("compile-attempt-1", async () => {
         try {
-          return await compileManifestWithBudget(scriptCtx.compiler_input);
+          return await runCompilePrimaryAttempt(scriptCtx.compiler_input);
         } catch (error) {
           if (error instanceof CompilerError) {
             await markScriptFailed(scriptId, formatCompilerFailureMessage(error));
             throw new NonRetriableError(formatCompilerFailureMessage(error));
           }
-          if (error instanceof CompileStepTimeoutError) {
-            await markScriptFailed(scriptId, error.message);
-            throw new NonRetriableError(error.message);
-          }
           throw error;
         }
       });
+
+      let attempt1: Manifest;
+      if (shouldRetryCompileOnTimeout(attempt1Result)) {
+        console.error(
+          `compile-attempt-1 soft-timeout after ${attempt1Result.durationMs}ms; ` +
+            `scheduling compile-attempt-1-retry as separate step`,
+        );
+        attempt1 = await step.run("compile-attempt-1-retry", async () => {
+          try {
+            const retry = await runCompilePrimaryAttempt(scriptCtx.compiler_input);
+            if (retry.status === "timeout") {
+              await markScriptFailed(scriptId, retry.message);
+              throw new NonRetriableError(retry.message);
+            }
+            console.error(
+              `compile-attempt-1-retry succeeded in ${retry.durationMs}ms`,
+            );
+            return retry.manifest;
+          } catch (error) {
+            if (error instanceof NonRetriableError) throw error;
+            if (error instanceof CompilerError) {
+              await markScriptFailed(scriptId, formatCompilerFailureMessage(error));
+              throw new NonRetriableError(formatCompilerFailureMessage(error));
+            }
+            throw error;
+          }
+        });
+      } else {
+        attempt1 = attempt1Result.manifest;
+      }
 
       const lengthCheck = await step.run("compile-length-check", async () => {
         const check = assessCompileLength(attempt1, scriptCtx.compiler_input);
