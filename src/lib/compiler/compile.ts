@@ -71,10 +71,10 @@ export class CompileStepTimeoutError extends Error {
 }
 
 /**
- * Soft ceiling for a single compile step. Vercel/Inngest step budget is ~300s;
- * leave headroom so we fail-open instead of FUNCTION_INVOCATION_TIMEOUT.
+ * Soft ceiling for a single compile step. Inngest route maxDuration is 300s;
+ * leave ~30s headroom so we abort cleanly instead of FUNCTION_INVOCATION_TIMEOUT.
  */
-export const COMPILE_STEP_BUDGET_MS = 240_000;
+export const COMPILE_STEP_BUDGET_MS = 270_000;
 
 export function formatCompilerFailureMessage(error: CompilerError): string {
   const detail = error.validationErrors?.length
@@ -319,17 +319,19 @@ export async function compileManifest(
 
 /**
  * Run compileManifest with a soft time budget. On timeout, throws
- * CompileStepTimeoutError so the caller can fail-open (attempt-2) or fail
- * (attempt-1 with no fallback).
+ * CompileStepTimeoutError so the caller can schedule a separate-step retry
+ * (attempt-1) or fail-open (length expand attempt-2).
  */
 export async function compileManifestWithBudget(
   compilerInput: CompilerInput,
   options?: CompileManifestOptions & { budgetMs?: number },
 ): Promise<Manifest> {
   const budgetMs = options?.budgetMs ?? COMPILE_STEP_BUDGET_MS;
+  const lengthMin = compilerInput.session.duration_min;
+  const started = Date.now();
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    return await Promise.race([
+    const manifest = await Promise.race([
       compileManifest(compilerInput, options),
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
@@ -341,6 +343,18 @@ export async function compileManifestWithBudget(
         }, budgetMs);
       }),
     ]);
+    const durationMs = Date.now() - started;
+    console.error(
+      `compile duration_ms=${durationMs} budget_ms=${budgetMs} length_min=${lengthMin} outcome=ok`,
+    );
+    return manifest;
+  } catch (error) {
+    const durationMs = Date.now() - started;
+    const outcome = error instanceof CompileStepTimeoutError ? "timeout" : "error";
+    console.error(
+      `compile duration_ms=${durationMs} budget_ms=${budgetMs} length_min=${lengthMin} outcome=${outcome}`,
+    );
+    throw error;
   } finally {
     if (timer) clearTimeout(timer);
   }

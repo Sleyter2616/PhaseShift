@@ -33,10 +33,12 @@ POST /api/scripts
       |  spends minutes (subscription-first), writes goal_version + script(status=generating)
       |  returns script_id immediately
       v
-Inngest job: generate-script
+Inngest job: generate-script  (route maxDuration=300s; soft compile budget ~270s)
       |
-      |-- step: Claude compile (prompt **v2.5** default + intake + skeleton givens;
-      |          pin older via COMPILER_PROMPT_VERSION; v1.4 fallback)
+      |-- step: compile-attempt-1 — Claude compile (prompt **v2.5** default + intake +
+      |          skeleton givens; pin older via COMPILER_PROMPT_VERSION; v1.4 fallback)
+      |          Soft-budget timeout → schedule **compile-attempt-1-retry** as its **own**
+      |          Inngest step (fresh 300s ceiling). Fail only if the retry also times out.
       |-- step: Zod-validate manifest against skeleton steps/budgets; 1 retry with errors
       |-- step: script-qa (person-agreement fix; block broken scripts pre-synth)
       |-- step: compile-length-check — if under 97% of budget, schedule **compile-attempt-2**
@@ -521,7 +523,11 @@ Actual per-length table (seconds; sums = `length_min × 60`):
 
 **Exact session length.** Phase budgets sum to `length_min × 60` exactly. After synthesis, wall-clock length is forced to the budgeted total by **distributed theta dwelling silence** (`reconcileSessionLength` in `src/lib/schedule/reconcile.ts`) — delivered length equals labeled length within tolerance. Billing always charges the **exact budgeted** `length_min × voice_multiplier`, not measured speech time.
 
-**Fail-open compile.** Compile never hangs on underwrite: attempt-1 fail-opens; if content is under 97% of budget, **compile-attempt-2** runs as a **separate Inngest step** with its own time budget. If attempt-2 fails/times out, the pipeline keeps attempt-1 and dwelling fine-tunes length.
+**Compile step budgets.** `/api/inngest` sets `maxDuration = 300`. Each compile runs in its own Inngest step with a soft budget of **`COMPILE_STEP_BUDGET_MS` ≈ 270s** (~30s headroom before the hard kill). Compiles log `duration_ms` / `length_min` / `outcome` so long-session latency (especially 45-min) is observable; accept that long sessions may need the timeout retry rather than failing early.
+
+**Soft-timeout retry.** If **compile-attempt-1** hits the soft budget, the pipeline schedules **compile-attempt-1-retry** as a **separate Inngest step** (fresh 300s ceiling) — same pattern as underwrite expand. Minutes were already spent once at enqueue; a successful retry completes the generation without re-spend. Only after the retry also times out (or a hard `CompilerError`) does the script mark `failed` and **refund** (idempotent via `minutes_ledger` refund rows — no double-refund if mark-failed runs more than once).
+
+**Fail-open compile (underwrite).** Compile never hangs on underwrite: attempt-1 fail-opens; if content is under 97% of budget, **compile-attempt-2** runs as a **separate Inngest step** with its own time budget. If attempt-2 fails/times out, the pipeline keeps attempt-1 and dwelling fine-tunes length.
 
 Effective pacing (words per minute, silence included): beta 130, alpha 90, theta 105, gamma 150. Character/COGS estimates scale with length; minutes billing meters `length_min × voice_multiplier` (Section 5).
 
@@ -687,7 +693,7 @@ Capacity planning still tracks ElevenLabs character spend separately from user-f
 
 **v0.5 — Customizable Protocol (current):**
 
-- **v0.5-1 (landed through ~1.12 / welcome grant):** Server-owned skeleton; length ladder 10/15/30/45; step model B; posture; self-paced breath; exact length via theta dwelling; fail-open compile-attempt-2 as its own Inngest step; person-agreement script-qa; tone mix cap; prompt **v2.5**; minutes = budgeted length × voice multiplier; welcome grant (env toggle); stuck-generation reaper cron.
+- **v0.5-1 (landed through ~1.12 / welcome grant):** Server-owned skeleton; length ladder 10/15/30/45; step model B; posture; self-paced breath; exact length via theta dwelling; fail-open compile-attempt-2 as its own Inngest step; soft-timeout → one separate-step compile retry (~270s soft / 300s maxDuration); person-agreement script-qa; tone mix cap; prompt **v2.5**; minutes = budgeted length × voice multiplier; welcome grant (env toggle); stuck-generation reaper cron.
 - **Wizard length + reuse (landed):** length picker + prior-session answer reuse. Contiguous middle-step picker UI still deferred (API ready).
 - **First-session primer (landed):** one-time how-to gate before first playback (`primer_seen_at`); revisit via `/how-to`.
 - Later v0.5: Recognition Log / re-triangulate polish; regen copy-through mode (D8).
