@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChoiceControl } from "@/components/choice-control";
 import {
   availableMinutes,
@@ -29,7 +29,14 @@ import {
 } from "@/lib/contracts/wizard";
 import type { PriorSessionOption } from "@/lib/contracts/wizard-from-prior";
 import { WIZARD_STEP_COPY } from "@/lib/contracts/wizard-copy";
+import type { WizardVoiceStatus } from "@/lib/voice/profile-select";
 import type { StockVoiceOption } from "@/lib/voice/stock-voices";
+import {
+  clearWizardDraft,
+  loadWizardDraft,
+  saveWizardDraft,
+  wizardDraftHasContent,
+} from "@/lib/wizard/draft-storage";
 import { ChipInput } from "./chip-input";
 import { FieldExplainer, StepExplainer } from "./step-explainer";
 
@@ -38,7 +45,9 @@ const FEATURE_LINT_MESSAGE =
   "Must include a concrete noun (observability lint)";
 
 interface WizardFlowProps {
+  userId: string;
   readyVoiceProfileId: string | null;
+  voiceStatus: WizardVoiceStatus;
   stockVoices: StockVoiceOption[];
   minutesBalance: {
     subscription: number;
@@ -63,8 +72,28 @@ function formatResetDate(iso: string | null): string {
   return new Date(iso).toLocaleDateString();
 }
 
+function normalizeDraftForVoice(
+  draft: WizardDraft,
+  readyVoiceProfileId: string | null,
+  defaultStockId: string | null,
+): WizardDraft {
+  const ownOk =
+    draft.voice_profile_id != null &&
+    readyVoiceProfileId != null &&
+    draft.voice_profile_id === readyVoiceProfileId;
+  return {
+    ...draft,
+    voice_profile_id: ownOk ? draft.voice_profile_id : null,
+    stock_voice_id: ownOk
+      ? null
+      : (draft.stock_voice_id ?? defaultStockId),
+  };
+}
+
 export function WizardFlow({
+  userId,
   readyVoiceProfileId,
+  voiceStatus,
   stockVoices,
   minutesBalance,
   priorSessions = [],
@@ -77,16 +106,7 @@ export function WizardFlow({
   const [step, setStep] = useState(1);
   const [draft, setDraft] = useState<WizardDraft>(() => {
     if (initialDraft) {
-      return {
-        ...initialDraft,
-        stock_voice_id: initialDraft.stock_voice_id ?? defaultStockId,
-        voice_profile_id:
-          initialDraft.voice_profile_id &&
-          readyVoiceProfileId &&
-          initialDraft.voice_profile_id === readyVoiceProfileId
-            ? initialDraft.voice_profile_id
-            : null,
-      };
+      return normalizeDraftForVoice(initialDraft, readyVoiceProfileId, defaultStockId);
     }
     return {
       ...EMPTY_WIZARD_DRAFT,
@@ -102,6 +122,38 @@ export function WizardFlow({
   const [checkoutPending, setCheckoutPending] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [useCustomDate, setUseCustomDate] = useState(false);
+  const [draftRestored, setDraftRestored] = useState(false);
+  const skipNextSave = useRef(Boolean(initialFromScriptId));
+
+  // Restore local draft after mount (survives refresh / Stripe top-up redirect).
+  useEffect(() => {
+    if (initialFromScriptId) return;
+    const stored = loadWizardDraft(userId);
+    if (!stored || !wizardDraftHasContent(stored.draft)) return;
+    skipNextSave.current = true;
+    setDraft(normalizeDraftForVoice(stored.draft, readyVoiceProfileId, defaultStockId));
+    setStep(stored.step);
+    setReusedFromId(stored.reusedFromId);
+    setDraftRestored(true);
+    // Only hydrate once on mount for this user / from-script combo.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional mount hydrate
+  }, [userId, initialFromScriptId]);
+
+  // Autosave draft + step (debounced).
+  useEffect(() => {
+    if (skipNextSave.current) {
+      skipNextSave.current = false;
+      return;
+    }
+    if (!wizardDraftHasContent(draft) && step === 1) {
+      clearWizardDraft(userId);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      saveWizardDraft(userId, { step, draft, reusedFromId });
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [userId, step, draft, reusedFromId]);
 
   const showRewriteChip = PRESENT_TENSE_GOAL_PATTERN.test(draft.goal_statement);
   const goalCharCount = draft.goal_statement.length;
@@ -135,29 +187,26 @@ export function WizardFlow({
   function applyPriorSession(scriptId: string) {
     const prior = priorDrafts[scriptId];
     if (!prior) return;
-    const ownVoiceOk =
-      prior.voice_profile_id != null &&
-      readyVoiceProfileId != null &&
-      prior.voice_profile_id === readyVoiceProfileId;
-    setDraft({
-      ...prior,
-      voice_profile_id: ownVoiceOk ? prior.voice_profile_id : null,
-      stock_voice_id: prior.stock_voice_id ?? defaultStockId,
-    });
+    skipNextSave.current = false;
+    setDraft(normalizeDraftForVoice(prior, readyVoiceProfileId, defaultStockId));
     setReusedFromId(scriptId);
     setShowReusePicker(false);
     setStep(1);
     setStepError(null);
     setInsufficient(null);
+    setDraftRestored(false);
   }
 
   function clearReuse() {
+    skipNextSave.current = true;
+    clearWizardDraft(userId);
     setDraft({
       ...EMPTY_WIZARD_DRAFT,
       stock_voice_id: defaultStockId,
     });
     setReusedFromId(null);
     setStep(1);
+    setDraftRestored(false);
   }
 
   function selectStockVoice(voiceId: string) {
@@ -168,7 +217,7 @@ export function WizardFlow({
     if (!readyVoiceProfileId) return;
     updateDraft({
       voice_profile_id: readyVoiceProfileId,
-      stock_voice_id: draft.stock_voice_id ?? defaultStockId,
+      stock_voice_id: null,
     });
   }
 
@@ -260,6 +309,7 @@ export function WizardFlow({
       } = await response.json().catch(() => ({}));
 
       if (response.status === 202 && payload.script_id) {
+        clearWizardDraft(userId);
         router.push(`/dev/scripts/${payload.script_id}`);
         return;
       }
@@ -309,6 +359,14 @@ export function WizardFlow({
 
   return (
     <div className="space-y-8">
+      {draftRestored ? (
+        <p className="rounded border border-[var(--setup-border)] bg-[var(--setup-panel)] px-4 py-3 text-sm text-[var(--text-mid)]">
+          Restored your in-progress draft.{" "}
+          <button type="button" className="btn-link" onClick={clearReuse}>
+            Discard and start blank
+          </button>
+        </p>
+      ) : null}
       {priorSessions.length > 0 ? (
         <section className="space-y-3 rounded border border-[var(--setup-border)] bg-[var(--setup-panel)] p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -700,6 +758,22 @@ export function WizardFlow({
                   My voice
                   <span className="ml-2 text-sm text-[var(--text-lo)]">({ownCost} min)</span>
                 </ChoiceControl>
+              ) : voiceStatus === "pending" ? (
+                <p className="margin-note">
+                  Your voice clone is still processing.{" "}
+                  <Link href="/voice" className="btn-link">
+                    Check status
+                  </Link>{" "}
+                  or refresh this page when it is ready.
+                </p>
+              ) : voiceStatus === "failed" ? (
+                <p className="margin-note">
+                  Your voice clone did not finish.{" "}
+                  <Link href="/voice" className="btn-link">
+                    Retry or re-record
+                  </Link>{" "}
+                  to unlock own-voice.
+                </p>
               ) : (
                 <p className="margin-note">
                   <Link href="/voice" className="btn-link">

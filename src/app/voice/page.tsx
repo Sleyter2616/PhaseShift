@@ -5,9 +5,9 @@ import { getSessionUser } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import {
   isMockProviderVoiceId,
-  isRealReadyProfile,
   storedVoiceSampleExists,
 } from "@/lib/voice/process-voice-sample";
+import { pickBestVoiceProfile } from "@/lib/voice/profile-select";
 import { VoiceOnboarding } from "./voice-onboarding";
 
 export default async function VoicePage() {
@@ -15,22 +15,16 @@ export default async function VoicePage() {
   if (!user) redirect("/login");
 
   const supabase = await createClient();
-  const { data: profile } = await supabase
+  const { data: voiceRows } = await supabase
     .from("voice_profiles")
-    .select("status, consent_confirmed_at, provider_voice_id")
-    .maybeSingle();
+    .select("status, consent_confirmed_at, provider_voice_id, id")
+    .order("created_at", { ascending: false });
+
+  const voice = pickBestVoiceProfile(voiceRows);
+  const profile = voice.profile;
 
   const hasStoredSample = await storedVoiceSampleExists(user.id);
-  const isMockReady =
-    profile?.status === "ready" && isMockProviderVoiceId(profile.provider_voice_id);
-
-  const status = isRealReadyProfile(profile ?? { status: "none", provider_voice_id: null })
-    ? "ready"
-    : profile?.status === "failed" || isMockReady
-      ? "failed"
-      : profile?.status === "pending"
-        ? "pending"
-        : "none";
+  const status = voice.status;
 
   const providerVoiceId =
     profile?.provider_voice_id && !isMockProviderVoiceId(profile.provider_voice_id)
