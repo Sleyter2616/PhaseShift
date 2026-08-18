@@ -5,10 +5,11 @@ import {
   type SessionLengthMin,
 } from "./compiler/skeleton";
 
-/** §2.3 — Effective pacing (words per minute, silence included) */
+/** §2.3 — Effective pacing (words per minute, silence included).
+ * Opening (beta + early alpha) is deliberately slow so the listener can settle. */
 export const PACING_WPM = {
-  beta: 130,
-  alpha: 90,
+  beta: 100,
+  alpha: 78,
   theta: 105,
   gamma: 150,
 } as const;

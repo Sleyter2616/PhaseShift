@@ -28,7 +28,7 @@ describe("deriveSessionFromIntake", () => {
     const session = deriveSessionFromIntake(intakeWithDuration(duration));
     expect(session.duration_min).toBe(duration);
     expect(session.phase_budget_sec).toEqual(PHASE_BUDGET_SEC[duration]);
-    expect(session.pacing).toEqual({ beta_wpm: 130, alpha_wpm: 90, theta_wpm: 105, gamma_wpm: 150 });
+    expect(session.pacing).toEqual({ beta_wpm: 100, alpha_wpm: 78, theta_wpm: 105, gamma_wpm: 150 });
     const total =
       session.phase_budget_sec.beta +
       session.phase_budget_sec.alpha +

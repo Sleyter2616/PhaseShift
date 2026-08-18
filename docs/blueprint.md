@@ -35,7 +35,7 @@ POST /api/scripts
       v
 Inngest job: generate-script  (route maxDuration=300s; soft compile budget ~270s)
       |
-      |-- step: compile-attempt-1 — Claude compile (prompt **v2.5** default + intake +
+      |-- step: compile-attempt-1 — Claude compile (prompt **v2.6** default + intake +
       |          skeleton givens; pin older via COMPILER_PROMPT_VERSION; v1.4 fallback)
       |          Soft-budget timeout → schedule **compile-attempt-1-retry** as its **own**
       |          Inngest step (fresh 300s ceiling). Fail only if the retry also times out.
@@ -464,11 +464,12 @@ When `beta` budget is `0` (10-minute sessions), omit beta segments entirely and 
 
 ### 2.2 Compiler prompts (versioned, immutable)
 
-Prompts live in `src/lib/compiler/prompt.vN.ts`. **Once shipped, a version is immutable** — add `prompt.vN+1.ts` instead of editing. Default today: **v2.5** (`resolveCompilerPromptVersion` in `compile.ts`).
+Prompts live in `src/lib/compiler/prompt.vN.ts`. **Once shipped, a version is immutable** — add `prompt.vN+1.ts` instead of editing. Default today: **v2.6** (`resolveCompilerPromptVersion` in `compile.ts`).
 
 | Version | Role |
 | ------- | ---- |
-| **v2.5** (default) | Person-aware intake embeds (`my→your` in second-person guidance) + pre-synth script-qa. |
+| **v2.6** (default) | Unhurried opening (beta + early alpha before body scan). |
+| **v2.5** | Person-aware intake embeds (`my→your` in second-person guidance) + pre-synth script-qa. |
 | **v2.4** | Hard word-budget minimums so content aims at labeled duration (underwrite gate at 97%). |
 | **v2.3** | Self-paced breath: state 4/2/8/2 **once**, then guide over the user's own pacing (no live cueing). |
 | **v2.2** | Depth-by-length calibration (full arc at 30; denser at 45). |
@@ -476,7 +477,7 @@ Prompts live in `src/lib/compiler/prompt.vN.ts`. **Once shipped, a version is im
 | **v2.0** | Skeleton as GIVENS: phase budgets, selected steps, posture, counted-sequence tables. |
 | **v1.4** | Legacy full-arc prompt. Fallback via `COMPILER_PROMPT_VERSION=v1.4`. |
 
-Authoritative text: `src/lib/compiler/prompt.v2.5.ts` (and prior immutable files). Do not paste divergent copies into this blueprint.
+Authoritative text: `src/lib/compiler/prompt.v2.6.ts` (and prior immutable files). Do not paste divergent copies into this blueprint.
 
 **Structural rules (v2.x summary):**
 
@@ -519,7 +520,7 @@ Actual per-length table (seconds; sums = `length_min × 60`):
 
 **Posture** (`sitting` default | `lying`): does **not** change durations. It **does** change body-reference language in the prompt (sitting vs lying cues for orientation, theta depth, and gamma intensity).
 
-**Counted sequences:** server owns timings via `buildCountedSequence` / splice helpers. Alpha **breath is not spliced** (model writes one self-paced instruction). Alpha **countdown** and gamma energizing/count-up are server-spliced micro-segments (numbers into silence / timed beats). The model must not invent competing live breath cues.
+**Counted sequences:** server owns timings via `buildCountedSequence` / splice helpers. Alpha **breath is not spliced** (model writes one self-paced instruction). Alpha **countdown** and gamma energizing/count-up are server-spliced micro-segments (numbers into silence / timed beats). Gamma energizing cycles are always inhale → hold → exhale → pause. The model must not invent competing live breath cues.
 
 **Exact session length.** Phase budgets sum to `length_min × 60` exactly. After synthesis, wall-clock length is forced to the budgeted total by **distributed theta dwelling silence** (`reconcileSessionLength` in `src/lib/schedule/reconcile.ts`) — delivered length equals labeled length within tolerance. Billing always charges the **exact budgeted** `length_min × voice_multiplier`, not measured speech time.
 
@@ -529,7 +530,9 @@ Actual per-length table (seconds; sums = `length_min × 60`):
 
 **Fail-open compile (underwrite).** Compile never hangs on underwrite: attempt-1 fail-opens; if content is under 97% of budget, **compile-attempt-2** runs as a **separate Inngest step** with its own time budget. If attempt-2 fails/times out, the pipeline keeps attempt-1 and dwelling fine-tunes length.
 
-Effective pacing (words per minute, silence included): beta 130, alpha 90, theta 105, gamma 150. Character/COGS estimates scale with length; minutes billing meters `length_min × voice_multiplier` (Section 5).
+Effective pacing (words per minute, silence included): beta **100**, alpha **78**, theta 105, gamma 150 (opening deliberately slower so beta / early alpha feel unhurried). Character/COGS estimates scale with length; minutes billing meters `length_min × voice_multiplier` (Section 5).
+
+**Gamma energizing breath.** Server-owned `energizing_breath` cycles are complete and possible: inhale → short hold → exhale → pause (never consecutive inhales). Cadence is brisk vs alpha self-paced 4/2/8, but always completable; skeleton validation rejects inhale-without-exhale and over-long holds.
 
 **Post-synthesis duration reconciliation.** Do not trust the compiler to hit duration through word count alone. The source of truth is `actual_duration_sec` plus scheduled pauses. After synthesis:
 
@@ -693,7 +696,7 @@ Capacity planning still tracks ElevenLabs character spend separately from user-f
 
 **v0.5 — Customizable Protocol (current):**
 
-- **v0.5-1 (landed through ~1.12 / welcome grant):** Server-owned skeleton; length ladder 10/15/30/45; step model B; posture; self-paced breath; exact length via theta dwelling; fail-open compile-attempt-2 as its own Inngest step; soft-timeout → one separate-step compile retry (~270s soft / 300s maxDuration); person-agreement script-qa; tone mix cap; prompt **v2.5**; minutes = budgeted length × voice multiplier; welcome grant (env toggle); stuck-generation reaper cron.
+- **v0.5-1 (landed through ~1.14 breath/pace):** Server-owned skeleton; length ladder 10/15/30/45; step model B; posture; self-paced breath; gamma energizing = full inhale/hold/exhale cycles; opening pace slower (beta 100 / alpha 78 + settle pauses); exact length via theta dwelling; fail-open compile-attempt-2 as its own Inngest step; soft-timeout → one separate-step compile retry (~270s soft / 300s maxDuration); person-agreement script-qa; tone mix cap; prompt **v2.6**; minutes = budgeted length × voice multiplier; welcome grant (env toggle); stuck-generation reaper cron.
 - **Wizard length + reuse (landed):** length picker + prior-session answer reuse. Contiguous middle-step picker UI still deferred (API ready).
 - **First-session primer (landed):** one-time how-to gate before first playback (`primer_seen_at`); revisit via `/how-to`.
 - Later v0.5: Recognition Log / re-triangulate polish; regen copy-through mode (D8).

@@ -360,11 +360,29 @@ export function distributeThetaTime(theta_sec: number, steps: number[]): ThetaSt
  */
 export const BREATH_INHALE_SEC = 4;
 export const BREATH_HOLD_SEC = 2;
+/** Soft-hold cap for alpha-style breath ratio (self-paced instruction). */
+export const BREATH_HOLD_CAP_SEC = 2;
 export const BREATH_EXHALE_SEC = 8;
 /** @deprecated Rest slot from former live-cued cycle; kept for ratio docs/tests. */
 export const BREATH_PAUSE_SEC = 2;
 export const BREATH_CYCLE_SEC =
   BREATH_INHALE_SEC + BREATH_HOLD_SEC + BREATH_EXHALE_SEC + BREATH_PAUSE_SEC;
+
+/**
+ * Gamma energizing breath — brisk but completable full cycles.
+ * inhale → short hold → exhale → brief pause (never inhale-without-exhale).
+ */
+export const ENERGIZING_INHALE_SEC = 2;
+export const ENERGIZING_HOLD_SEC = 1;
+/** Hard cap on energizing holds (seconds). */
+export const ENERGIZING_HOLD_CAP_SEC = 3;
+export const ENERGIZING_EXHALE_SEC = 2;
+export const ENERGIZING_PAUSE_SEC = 1;
+export const ENERGIZING_CYCLE_SEC =
+  ENERGIZING_INHALE_SEC +
+  ENERGIZING_HOLD_SEC +
+  ENERGIZING_EXHALE_SEC +
+  ENERGIZING_PAUSE_SEC;
 
 /** Spoken cues for gamma energizing_breath micros (alpha no longer live-cues). */
 export const BREATH_CUES = {
@@ -372,6 +390,47 @@ export const BREATH_CUES = {
   hold: "Hold.",
   exhale: "Breathe out.",
 } as const;
+
+/**
+ * Reject physically impossible breath patterns: inhale without a following
+ * exhale before the next inhale, and holds over the kind-specific cap.
+ */
+export function validateBreathBeats(
+  kind: CountedSequenceKind,
+  beats: CountedBeat[],
+): void {
+  if (kind !== "breath" && kind !== "energizing_breath") return;
+
+  const holdCap = kind === "energizing_breath" ? ENERGIZING_HOLD_CAP_SEC : BREATH_HOLD_CAP_SEC;
+  let awaitingExhale = false;
+
+  for (const beat of beats) {
+    if (beat.kind === "inhale") {
+      if (awaitingExhale) {
+        throw new SkeletonValidationError(
+          `${kind}: inhale without intervening exhale (impossible breath pattern)`,
+        );
+      }
+      awaitingExhale = true;
+      continue;
+    }
+    if (beat.kind === "exhale") {
+      awaitingExhale = false;
+      continue;
+    }
+    if (beat.kind === "hold" && beat.sec > holdCap) {
+      throw new SkeletonValidationError(
+        `${kind}: hold ${beat.sec}s exceeds cap ${holdCap}s`,
+      );
+    }
+  }
+
+  if (awaitingExhale) {
+    throw new SkeletonValidationError(
+      `${kind}: cycle ends after inhale without an exhale`,
+    );
+  }
+}
 
 /**
  * Server-owned counted-sequence timing with enforced break intervals so
@@ -405,6 +464,7 @@ export function buildCountedSequence(
       beats.push({ kind: "pause", sec: BREATH_PAUSE_SEC });
     }
     const total_sec = cycles * BREATH_CYCLE_SEC;
+    validateBreathBeats(kind, beats);
     return {
       kind,
       count: cycles,
@@ -429,20 +489,25 @@ export function buildCountedSequence(
       }
     }
   } else {
+    // energizing_breath — complete cycles: inhale → hold → exhale → pause
     const rounds = count;
-    const perRound = Math.floor(totalSec / rounds);
-    let used = 0;
+    const minNeeded = rounds * ENERGIZING_CYCLE_SEC;
+    if (totalSec < minNeeded) {
+      throw new SkeletonValidationError(
+        `energizing_breath needs at least ${minNeeded}s for ${rounds} complete cycles (got ${totalSec}s)`,
+      );
+    }
+
+    let leftover = totalSec - minNeeded;
     for (let r = 1; r <= rounds; r += 1) {
-      const breathBlock = Math.max(4, Math.floor(perRound * 0.7));
-      const hold = Math.max(2, Math.floor(perRound * 0.2));
-      const pause =
-        r === rounds
-          ? Math.max(1, totalSec - used - breathBlock - hold)
-          : Math.max(1, perRound - breathBlock - hold);
-      beats.push({ kind: "inhale", sec: breathBlock });
-      beats.push({ kind: "hold", sec: hold });
-      beats.push({ kind: "pause", sec: pause });
-      used += breathBlock + hold + pause;
+      const remainingRounds = rounds - r + 1;
+      const extraPause = Math.floor(leftover / remainingRounds);
+      leftover -= extraPause;
+
+      beats.push({ kind: "inhale", sec: ENERGIZING_INHALE_SEC });
+      beats.push({ kind: "hold", sec: ENERGIZING_HOLD_SEC });
+      beats.push({ kind: "exhale", sec: ENERGIZING_EXHALE_SEC });
+      beats.push({ kind: "pause", sec: ENERGIZING_PAUSE_SEC + extraPause });
     }
   }
 
@@ -463,6 +528,8 @@ export function buildCountedSequence(
   if (!hasBreak) {
     throw new SkeletonValidationError("counted sequence must include enforced breaks");
   }
+
+  validateBreathBeats(kind, beats);
 
   return {
     kind,

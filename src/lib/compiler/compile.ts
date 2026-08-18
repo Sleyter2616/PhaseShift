@@ -31,6 +31,10 @@ import {
   COMPILER_PROMPT_V2_5,
   PROMPT_VERSION as PROMPT_VERSION_V2_5,
 } from "../compiler/prompt.v2.5";
+import {
+  COMPILER_PROMPT_V2_6,
+  PROMPT_VERSION as PROMPT_VERSION_V2_6,
+} from "../compiler/prompt.v2.6";
 import { stripCodeFences } from "../compiler/strip-fences";
 import {
   estimateManifestWallClockSec,
@@ -105,9 +109,10 @@ export type CompilerPromptVersion =
   | "v2.2"
   | "v2.3"
   | "v2.4"
-  | "v2.5";
+  | "v2.5"
+  | "v2.6";
 
-/** Default v2.5; set COMPILER_PROMPT_VERSION to pin an older prompt. */
+/** Default v2.6; set COMPILER_PROMPT_VERSION to pin an older prompt. */
 export function resolveCompilerPromptVersion(
   override?: CompilerPromptVersion,
 ): CompilerPromptVersion {
@@ -119,7 +124,9 @@ export function resolveCompilerPromptVersion(
   if (env === "v2.2") return "v2.2";
   if (env === "v2.3") return "v2.3";
   if (env === "v2.4") return "v2.4";
-  return "v2.5";
+  if (env === "v2.5") return "v2.5";
+  if (env === "v2.6") return "v2.6";
+  return "v2.6";
 }
 
 function promptForVersion(version: CompilerPromptVersion): {
@@ -144,7 +151,10 @@ function promptForVersion(version: CompilerPromptVersion): {
   if (version === "v2.4") {
     return { system: COMPILER_PROMPT_V2_4, promptVersion: PROMPT_VERSION_V2_4 };
   }
-  return { system: COMPILER_PROMPT_V2_5, promptVersion: PROMPT_VERSION_V2_5 };
+  if (version === "v2.5") {
+    return { system: COMPILER_PROMPT_V2_5, promptVersion: PROMPT_VERSION_V2_5 };
+  }
+  return { system: COMPILER_PROMPT_V2_6, promptVersion: PROMPT_VERSION_V2_6 };
 }
 
 export type CompileManifestOptions = {
@@ -360,7 +370,7 @@ export async function compileManifestWithBudget(
   }
 }
 
-export const PROMPT_VERSION = PROMPT_VERSION_V2_5;
+export const PROMPT_VERSION = PROMPT_VERSION_V2_6;
 export {
   PROMPT_VERSION_V1_4,
   PROMPT_VERSION_V2,
@@ -369,4 +379,5 @@ export {
   PROMPT_VERSION_V2_3,
   PROMPT_VERSION_V2_4,
   PROMPT_VERSION_V2_5,
+  PROMPT_VERSION_V2_6,
 };

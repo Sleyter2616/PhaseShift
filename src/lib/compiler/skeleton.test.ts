@@ -12,6 +12,7 @@ import {
   THETA_PER_STEP_FLOOR_SEC,
   validateStepSelection,
   SkeletonValidationError,
+  validateBreathBeats,
 } from "./skeleton";
 
 describe("LENGTHS ladder", () => {
@@ -180,15 +181,70 @@ describe("buildCountedSequence", () => {
     expect(counts.map((c) => c.n)).toEqual([10, 9, 8, 7, 6, 5, 4, 3, 2, 1]);
   });
 
-  it("builds countup and energizing breath with breaks", () => {
+  it("builds countup and energizing breath with complete inhale/hold/exhale cycles", () => {
     const up = buildCountedSequence("countup", 5, 25);
     expect(up.beats.some((b) => b.kind === "pause")).toBe(true);
     expect(up.beats.reduce((a, b) => a + b.sec, 0)).toBe(25);
 
     const energy = buildCountedSequence("energizing_breath", 3, 45);
     expect(energy.beats.some((b) => b.kind === "hold")).toBe(true);
+    expect(energy.beats.some((b) => b.kind === "exhale")).toBe(true);
     expect(energy.beats.some((b) => b.kind === "pause")).toBe(true);
     expect(energy.beats.reduce((a, b) => a + b.sec, 0)).toBe(45);
+
+    const kinds = energy.beats.map((b) => b.kind);
+    expect(kinds.filter((k) => k === "inhale")).toHaveLength(3);
+    expect(kinds.filter((k) => k === "exhale")).toHaveLength(3);
+    // Pattern: inhale, hold, exhale, pause × 3
+    expect(kinds).toEqual([
+      "inhale",
+      "hold",
+      "exhale",
+      "pause",
+      "inhale",
+      "hold",
+      "exhale",
+      "pause",
+      "inhale",
+      "hold",
+      "exhale",
+      "pause",
+    ]);
+  });
+
+  it("never emits two inhales without an exhale between them (energizing)", () => {
+    for (const totalSec of [30, 45, 60, 90]) {
+      const energy = buildCountedSequence("energizing_breath", 3, totalSec);
+      let awaitingExhale = false;
+      for (const beat of energy.beats) {
+        if (beat.kind === "inhale") {
+          expect(awaitingExhale).toBe(false);
+          awaitingExhale = true;
+        } else if (beat.kind === "exhale") {
+          awaitingExhale = false;
+        }
+      }
+      expect(awaitingExhale).toBe(false);
+    }
+  });
+
+  it("rejects impossible breath patterns in validateBreathBeats", () => {
+    expect(() =>
+      validateBreathBeats("energizing_breath", [
+        { kind: "inhale", sec: 2 },
+        { kind: "hold", sec: 1 },
+        { kind: "pause", sec: 1 },
+        { kind: "inhale", sec: 2 },
+      ]),
+    ).toThrow(/inhale without intervening exhale/);
+
+    expect(() =>
+      validateBreathBeats("energizing_breath", [
+        { kind: "inhale", sec: 2 },
+        { kind: "hold", sec: 5 },
+        { kind: "exhale", sec: 2 },
+      ]),
+    ).toThrow(/hold 5s exceeds cap/);
   });
 });
 
