@@ -52,7 +52,7 @@ In the prod Supabase project → **Authentication → URL configuration**:
 
 Signup `emailRedirectTo` → `/auth/callback`. Forgot-password `redirectTo` → `/auth/callback?next=/reset-password`. Do not point confirmation at `/reset-password`.
 
-Apply migrations through `0013_primer_seen_at.sql` on the prod database before serving traffic.
+Apply migrations through `0014_voice_profiles_one_per_user.sql` on the prod database before serving traffic.
 
 ## Inngest Cloud
 

@@ -9,7 +9,7 @@ import {
 } from "@/lib/contracts/wizard-from-prior";
 import type { WizardDraft } from "@/lib/contracts/wizard";
 import { createClient } from "@/lib/supabase/server";
-import { isRealReadyProfile } from "@/lib/voice/process-voice-sample";
+import { pickBestVoiceProfile } from "@/lib/voice/profile-select";
 import { stockVoiceOptionsFromEnv } from "@/lib/voice/stock-voices";
 import { WizardFlow } from "./wizard-flow";
 
@@ -24,8 +24,11 @@ export default async function WizardPage({
   const { from: fromScriptId } = await searchParams;
 
   const supabase = await createClient();
-  const [{ data: voiceProfile }, { data: profile }, { data: priorRows }] = await Promise.all([
-    supabase.from("voice_profiles").select("id, status, provider_voice_id").maybeSingle(),
+  const [{ data: voiceRows }, { data: profile }, { data: priorRows }] = await Promise.all([
+    supabase
+      .from("voice_profiles")
+      .select("id, status, provider_voice_id, consent_confirmed_at")
+      .order("created_at", { ascending: false }),
     supabase
       .from("profiles")
       .select("subscription_minutes, topup_minutes, subscription_minutes_reset_at")
@@ -38,8 +41,8 @@ export default async function WizardPage({
       .limit(20),
   ]);
 
-  const readyVoiceProfileId =
-    voiceProfile && isRealReadyProfile(voiceProfile) ? voiceProfile.id : null;
+  const voice = pickBestVoiceProfile(voiceRows);
+  const readyVoiceProfileId = voice.readyId;
 
   const stockVoices = stockVoiceOptionsFromEnv();
 
@@ -75,7 +78,9 @@ export default async function WizardPage({
       <SetupHeader />
       <main className="mx-auto w-full max-w-xl flex-1 px-4 py-8 sm:px-6">
         <WizardFlow
+          userId={user.id}
           readyVoiceProfileId={readyVoiceProfileId}
+          voiceStatus={voice.status}
           stockVoices={stockVoices}
           minutesBalance={{
             subscription: Number(profile?.subscription_minutes ?? 0),

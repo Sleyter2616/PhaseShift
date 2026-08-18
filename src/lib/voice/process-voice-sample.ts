@@ -124,14 +124,16 @@ export async function processVoiceSample(
   userId: string,
   audio: Blob,
 ): Promise<VoiceProcessResult> {
-  const { data: profile, error: profileError } = await supabase
+  const { data: profiles, error: profileError } = await supabase
     .from("voice_profiles")
     .select("id, consent_confirmed_at")
-    .maybeSingle();
+    .order("created_at", { ascending: false });
 
   if (profileError) {
     return { error: profileError.message };
   }
+  const profile = profiles?.[0] ?? null;
+
   if (!profile?.id || !profile.consent_confirmed_at) {
     return { error: "consent required before recording" };
   }
@@ -175,14 +177,16 @@ export async function retryVoiceCloneFromStoredSample(
   supabase: SupabaseClient,
   userId: string,
 ): Promise<VoiceProcessResult> {
-  const { data: profile, error: profileError } = await supabase
+  const { data: profiles, error: profileError } = await supabase
     .from("voice_profiles")
     .select("id, consent_confirmed_at")
-    .maybeSingle();
+    .order("created_at", { ascending: false });
 
   if (profileError) {
     return { error: profileError.message };
   }
+  const profile = profiles?.[0] ?? null;
+
   if (!profile?.id || !profile.consent_confirmed_at) {
     return { error: "consent required before recording" };
   }

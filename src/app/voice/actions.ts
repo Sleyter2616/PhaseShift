@@ -14,10 +14,12 @@ export async function confirmVoiceConsent(): Promise<{ error?: string }> {
   }
 
   const now = new Date().toISOString();
-  const { data: existing } = await supabase
+  const { data: existingRows } = await supabase
     .from("voice_profiles")
     .select("id")
-    .maybeSingle();
+    .order("created_at", { ascending: false });
+
+  const existing = existingRows?.[0] ?? null;
 
   if (existing?.id) {
     const { error } = await supabase
@@ -41,5 +43,6 @@ export async function confirmVoiceConsent(): Promise<{ error?: string }> {
   }
 
   revalidatePath("/voice");
+  revalidatePath("/wizard");
   return {};
 }

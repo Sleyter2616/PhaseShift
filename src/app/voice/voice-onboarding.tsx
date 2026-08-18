@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -212,6 +213,9 @@ export function VoiceOnboarding({
             {readyVoiceId}
           </code>
         </p>
+        <Link href="/wizard" className="btn-clay inline-flex">
+          Create a session with your voice
+        </Link>
         <button
           type="button"
           onClick={() => {
