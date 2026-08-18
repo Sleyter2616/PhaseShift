@@ -21,7 +21,7 @@ export function ForgotPasswordForm() {
 
     const supabase = createClient();
     // Enumeration-safe: always show the same confirmation after attempt.
-    // Pass live origin so redirectTo is always https://…/reset-password (never /).
+    // Recovery goes through /auth/callback?next=/reset-password (not bare /reset-password).
     const { error: resetError } = await supabase.auth.resetPasswordForEmail(
       email.trim(),
       {

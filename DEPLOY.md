@@ -8,7 +8,7 @@ Set these on the Vercel project (**Production**). Leave secrets empty in git; ne
 
 | Variable | Notes |
 | -------- | ----- |
-| `NEXT_PUBLIC_APP_URL` | Canonical prod origin: **`https://phaseshift.app`** (no trailing slash). Used for Stripe return URLs and Auth password-reset `redirectTo`. |
+| `NEXT_PUBLIC_APP_URL` | Canonical prod origin: **`https://phaseshift.app`** (no trailing slash). Used for Stripe return URLs and Auth `emailRedirectTo` / password-reset `redirectTo` (`/auth/callback`). |
 | `NEXT_PUBLIC_SUPABASE_URL` | Prod Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Prod anon key |
 | `SUPABASE_SERVICE_ROLE_KEY` | Prod service role (server-only) |
@@ -43,11 +43,14 @@ Optional: `INNGEST_SERVE_ORIGIN` if Inngest should sync against a custom domain 
 
 In the prod Supabase project → **Authentication → URL configuration**:
 
-1. **Site URL** — `https://phaseshift.app` (same as `NEXT_PUBLIC_APP_URL`). Site URL is the **fallback origin** only — it must not replace the `/reset-password` path on recovery links.
+1. **Site URL** — `https://phaseshift.app` (same as `NEXT_PUBLIC_APP_URL`). Site URL is the **fallback origin** only — email links should use the explicit `redirectTo` paths below.
 2. **Redirect URLs** — include at least:
-   - `https://phaseshift.app/reset-password` (**required** for password reset; without this, Supabase falls back to Site URL and the link lands on `/?code=…`)
-   - `https://phaseshift.app/auth/callback` (if used)
+   - `https://phaseshift.app/auth/callback` (**required** — signup confirmation + shared PKCE exchange)
+   - `https://phaseshift.app/auth/callback?next=/reset-password` (password recovery; or a wildcard that covers query variants)
+   - `https://phaseshift.app/reset-password` (legacy / post-callback landing)
    - `https://phaseshift.app/**` or the exact paths your app uses after magic-link / OAuth
+
+Signup `emailRedirectTo` → `/auth/callback`. Forgot-password `redirectTo` → `/auth/callback?next=/reset-password`. Do not point confirmation at `/reset-password`.
 
 Apply migrations through `0013_primer_seen_at.sql` on the prod database before serving traffic.
 

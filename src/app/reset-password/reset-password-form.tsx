@@ -4,8 +4,14 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { clearPasswordRecoveryCookie } from "./actions";
 
-export function ResetPasswordForm() {
+type Props = {
+  /** True when /auth/callback (or legacy OTP) established a recovery session. */
+  recoveryOk: boolean;
+};
+
+export function ResetPasswordForm({ recoveryOk }: Props) {
   const router = useRouter();
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -21,7 +27,6 @@ export function ResetPasswordForm() {
 
     async function establishRecoverySession() {
       const params = new URLSearchParams(window.location.search);
-      const code = params.get("code");
       const tokenHash = params.get("token_hash");
       const type = params.get("type");
       const authError = params.get("error_description") ?? params.get("error");
@@ -35,28 +40,26 @@ export function ResetPasswordForm() {
         return;
       }
 
-      // PKCE (current Supabase email links): ?code=<uuid>
-      if (code) {
-        const { error: exchangeError } =
-          await supabase.auth.exchangeCodeForSession(code);
+      // PKCE recovery is exchanged in /auth/callback — do not re-exchange here
+      // (a second exchange fails and previously showed a false error).
+      if (recoveryOk) {
+        const { data } = await supabase.auth.getSession();
         if (!cancelled) {
-          if (exchangeError) {
-            setLinkError(
-              exchangeError.message ||
-                "This reset link is invalid or has expired.",
-            );
-            setSessionReady(false);
-          } else {
+          if (data.session) {
             setSessionReady(true);
-            // Drop one-time code from the URL so refresh does not re-exchange.
-            window.history.replaceState({}, "", "/reset-password");
+            setLinkError(null);
+          } else {
+            setSessionReady(false);
+            setLinkError(
+              "This reset link is invalid or has expired. Request a new one and try again.",
+            );
           }
           setChecking(false);
         }
         return;
       }
 
-      // Legacy email format: ?token_hash=…&type=recovery
+      // Legacy email format that landed directly on this page.
       if (tokenHash && type === "recovery") {
         const { error: verifyError } = await supabase.auth.verifyOtp({
           type: "recovery",
@@ -71,6 +74,7 @@ export function ResetPasswordForm() {
             setSessionReady(false);
           } else {
             setSessionReady(true);
+            setLinkError(null);
             window.history.replaceState({}, "", "/reset-password");
           }
           setChecking(false);
@@ -78,14 +82,11 @@ export function ResetPasswordForm() {
         return;
       }
 
-      const { data } = await supabase.auth.getSession();
       if (!cancelled) {
-        setSessionReady(Boolean(data.session));
-        if (!data.session) {
-          setLinkError(
-            "This reset link is invalid or has expired. Request a new one and try again.",
-          );
-        }
+        setSessionReady(false);
+        setLinkError(
+          "This reset link is invalid or has expired. Request a new one and try again.",
+        );
         setChecking(false);
       }
     }
@@ -95,10 +96,13 @@ export function ResetPasswordForm() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event) => {
-      if (event === "PASSWORD_RECOVERY" || event === "SIGNED_IN") {
+      // Only PASSWORD_RECOVERY arms the form — never a plain SIGNED_IN
+      // (signup confirmation must not look like a reset session).
+      if (event === "PASSWORD_RECOVERY") {
         setSessionReady(true);
         setChecking(false);
         setLinkError(null);
+        setError(null);
       }
     });
 
@@ -106,7 +110,7 @@ export function ResetPasswordForm() {
       cancelled = true;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [recoveryOk]);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -130,6 +134,11 @@ export function ResetPasswordForm() {
       setError(updateError.message);
       return;
     }
+
+    // Success — clear any stale error and route forward (never show error on success).
+    setError(null);
+    setLinkError(null);
+    await clearPasswordRecoveryCookie();
 
     const {
       data: { user },

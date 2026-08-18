@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { appBaseUrl, passwordResetRedirectTo } from "./app-url";
+import {
+  appBaseUrl,
+  authCallbackRedirectTo,
+  passwordResetRedirectTo,
+} from "./app-url";
 
 describe("appBaseUrl", () => {
   it("defaults to localhost and strips trailing slash", () => {
@@ -10,20 +14,46 @@ describe("appBaseUrl", () => {
   });
 });
 
-describe("passwordResetRedirectTo", () => {
-  it("points at /reset-password on the canonical origin", () => {
+describe("authCallbackRedirectTo", () => {
+  it("points at bare /auth/callback for signup confirmation", () => {
     expect(
-      passwordResetRedirectTo({ NEXT_PUBLIC_APP_URL: "https://phaseshift.app" }),
-    ).toBe("https://phaseshift.app/reset-password");
+      authCallbackRedirectTo({ NEXT_PUBLIC_APP_URL: "https://phaseshift.app" }),
+    ).toBe("https://phaseshift.app/auth/callback");
   });
 
-  it("never returns the site root, even if origin already includes the path", () => {
+  it("prefers an explicit browser origin over env", () => {
+    expect(
+      authCallbackRedirectTo(
+        { NEXT_PUBLIC_APP_URL: "http://localhost:3000" },
+        { origin: "https://phaseshift.app" },
+      ),
+    ).toBe("https://phaseshift.app/auth/callback");
+  });
+});
+
+describe("passwordResetRedirectTo", () => {
+  it("routes recovery through /auth/callback?next=/reset-password", () => {
+    expect(
+      passwordResetRedirectTo({ NEXT_PUBLIC_APP_URL: "https://phaseshift.app" }),
+    ).toBe(
+      "https://phaseshift.app/auth/callback?next=%2Freset-password",
+    );
+  });
+
+  it("differs from signup confirmation redirect", () => {
+    const env = { NEXT_PUBLIC_APP_URL: "https://phaseshift.app" };
+    expect(passwordResetRedirectTo(env)).not.toBe(authCallbackRedirectTo(env));
+  });
+
+  it("never returns the site root, even if origin already includes a path", () => {
     expect(
       passwordResetRedirectTo(
         {},
         { origin: "https://phaseshift.app/reset-password" },
       ),
-    ).toBe("https://phaseshift.app/reset-password");
+    ).toBe(
+      "https://phaseshift.app/auth/callback?next=%2Freset-password",
+    );
   });
 
   it("prefers an explicit browser origin over env", () => {
@@ -32,6 +62,8 @@ describe("passwordResetRedirectTo", () => {
         { NEXT_PUBLIC_APP_URL: "http://localhost:3000" },
         { origin: "https://phaseshift.app" },
       ),
-    ).toBe("https://phaseshift.app/reset-password");
+    ).toBe(
+      "https://phaseshift.app/auth/callback?next=%2Freset-password",
+    );
   });
 });

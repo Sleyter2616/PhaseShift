@@ -3,24 +3,28 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import { authCallbackRedirectTo } from "@/lib/app-url";
 import { createClient } from "@/lib/supabase/client";
 
 export function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const initialMode = searchParams.get("mode") === "signup" ? "signup" : "signin";
+  const queryError = searchParams.get("error");
 
   const [mode, setMode] = useState<"signin" | "signup">(initialMode);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [agreedToTerms, setAgreedToTerms] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(queryError);
+  const [info, setInfo] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
   function switchMode(next: "signin" | "signup") {
     setMode(next);
     setError(null);
+    setInfo(null);
     setConfirmPassword("");
     setAgreedToTerms(false);
   }
@@ -28,6 +32,7 @@ export function LoginForm() {
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setError(null);
+    setInfo(null);
 
     if (mode === "signup") {
       if (password !== confirmPassword) {
@@ -46,7 +51,15 @@ export function LoginForm() {
     const result =
       mode === "signin"
         ? await supabase.auth.signInWithPassword({ email, password })
-        : await supabase.auth.signUp({ email, password });
+        : await supabase.auth.signUp({
+            email,
+            password,
+            options: {
+              emailRedirectTo: authCallbackRedirectTo(process.env, {
+                origin: window.location.origin,
+              }),
+            },
+          });
 
     if (result.error) {
       setPending(false);
@@ -54,10 +67,17 @@ export function LoginForm() {
       return;
     }
 
+    // Email confirmation required — session is null until they click the link.
+    if (mode === "signup" && !result.data.session) {
+      setPending(false);
+      setInfo("Check your email to confirm your account, then sign in.");
+      return;
+    }
+
     const userId = result.data.user?.id;
     if (!userId) {
       setPending(false);
-      setError("Check your email to confirm your account, then sign in.");
+      setError("Sign-in failed. Please try again.");
       return;
     }
 
@@ -141,6 +161,9 @@ export function LoginForm() {
         </>
       ) : null}
       {error ? <p className="text-error">{error}</p> : null}
+      {info ? (
+        <p className="text-sm leading-relaxed text-[var(--text-mid)]">{info}</p>
+      ) : null}
       <button type="submit" disabled={pending} className="btn-clay w-full py-2.5">
         {pending ? "Please wait…" : mode === "signin" ? "Sign in" : "Sign up"}
       </button>
