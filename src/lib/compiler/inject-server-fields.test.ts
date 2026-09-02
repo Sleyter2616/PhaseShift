@@ -101,6 +101,7 @@ describe("injectServerOwnedFields", () => {
       phase: "beta",
       step: null,
       pacing_wpm: 130,
+      pause_after_ms: 7000,
     });
     expect(stamped.segments[1]).toMatchObject({
       seq: 2,
@@ -109,5 +110,6 @@ describe("injectServerOwnedFields", () => {
       pacing_wpm: 105,
     });
     expect(actions.some((a) => a.includes("total_duration_sec"))).toBe(true);
+    expect(actions.some((a) => a.includes("opening settle"))).toBe(true);
   });
 });

@@ -6,7 +6,7 @@ import {
   formatCompilerFailureMessage,
   PROMPT_VERSION,
 } from "./compile";
-import { COMPILER_PROMPT_V2_5 } from "./prompt.v2.5";
+import { COMPILER_PROMPT_V2_6 } from "./prompt.v2.6";
 import type { CompilerInput } from "../session/derive";
 import { DEFAULT_ENTRAINMENT_PLAN } from "../session/derive";
 
@@ -163,11 +163,11 @@ describe("compileManifest", () => {
     vi.unstubAllEnvs();
   });
 
-  it("defaults to prompt v2.5", () => {
-    expect(PROMPT_VERSION).toBe("v2.5");
+  it("defaults to prompt v2.6", () => {
+    expect(PROMPT_VERSION).toBe("v2.6");
   });
 
-  it("sends the v2.5 system prompt and skeleton in the user message", async () => {
+  it("sends the v2.6 system prompt and skeleton in the user message", async () => {
     const create = vi.fn().mockResolvedValue({
       stop_reason: "end_turn",
       usage: { input_tokens: 1, output_tokens: 1 },
@@ -182,7 +182,7 @@ describe("compileManifest", () => {
       system: string;
       messages: [{ content: string }];
     };
-    expect(firstCall.system).toBe(COMPILER_PROMPT_V2_5);
+    expect(firstCall.system).toBe(COMPILER_PROMPT_V2_6);
     const user = JSON.parse(firstCall.messages[0]!.content) as {
       skeleton: {
         length_min: number;

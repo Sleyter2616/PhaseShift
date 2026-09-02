@@ -2,6 +2,9 @@ import type { CompilerInput } from "../session/derive";
 import type { ManifestSegment } from "../contracts/manifest";
 import { REFLECTIVE_PAUSE_MS } from "./skeleton";
 
+/** Extra silence after opening (beta / early alpha) segments so entry feels unhurried. */
+export const OPENING_SETTLE_PAUSE_MS = 7_000;
+
 const PHASES = ["beta", "alpha", "theta", "gamma", "delta"] as const;
 type Phase = (typeof PHASES)[number];
 
@@ -86,6 +89,38 @@ export function stampThetaReflectivePausesFromDepth(
 }
 
 /**
+ * Stamp settle pauses on beta and the first early-alpha content segment so the
+ * opening is unhurried before the progressive body scan.
+ */
+export function stampOpeningSettlePauses(
+  segments: Array<PauseStampable & Record<string, unknown>>,
+): { segments: Array<PauseStampable & Record<string, unknown>>; actions: string[] } {
+  const actions: string[] = [];
+  const next = segments.map((s) => ({ ...s }));
+  let stampedFirstAlpha = false;
+
+  for (const seg of next) {
+    if (seg.phase === "beta" && seg.pause_after_ms < OPENING_SETTLE_PAUSE_MS) {
+      actions.push(
+        `seq ${seg.seq}: stamped opening settle pause_after_ms ${seg.pause_after_ms}->${OPENING_SETTLE_PAUSE_MS}`,
+      );
+      seg.pause_after_ms = OPENING_SETTLE_PAUSE_MS;
+    }
+    if (seg.phase === "alpha" && !stampedFirstAlpha) {
+      stampedFirstAlpha = true;
+      if (seg.pause_after_ms < OPENING_SETTLE_PAUSE_MS) {
+        actions.push(
+          `seq ${seg.seq}: stamped early-alpha settle pause_after_ms ${seg.pause_after_ms}->${OPENING_SETTLE_PAUSE_MS}`,
+        );
+        seg.pause_after_ms = OPENING_SETTLE_PAUSE_MS;
+      }
+    }
+  }
+
+  return { segments: next, actions };
+}
+
+/**
  * Stamp server-owned skeleton/session fields onto a model-emitted draft
  * before normalize + validate. The model supplies segment content; the
  * server owns duration totals, entrainment, seq, and pacing_wpm.
@@ -146,8 +181,9 @@ export function injectServerOwnedFields(
 
   if (stampedSegments.every(isPauseStampable)) {
     const paused = stampThetaReflectivePausesFromDepth(stampedSegments, input);
-    stampedSegments = paused.segments;
-    actions.push(...paused.actions);
+    const opening = stampOpeningSettlePauses(paused.segments);
+    stampedSegments = opening.segments;
+    actions.push(...paused.actions, ...opening.actions);
   }
 
   draft.segments = stampedSegments;
