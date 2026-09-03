@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCountedSequence, buildSessionSkeleton } from "./skeleton";
+import { buildCountedSequence, buildSessionSkeleton, BODY_SCAN_CUES } from "./skeleton";
 import {
   expandCountedSequenceToMicroSegments,
   spokenCueForBeat,
@@ -54,10 +54,29 @@ describe("expandCountedSequenceToMicroSegments", () => {
     expect(micros.at(-1)!.pause_after_ms).toBe(lastSpokenMs);
   });
 
+  it("body scan is one short cue per part with 3–5s pause_after_ms (not a run-on)", () => {
+    const seq = buildCountedSequence("body_scan", 10, 60);
+    const micros = expandCountedSequenceToMicroSegments(seq, "alpha", 78);
+    expect(micros).toHaveLength(10);
+    expect(new Set(micros.map((m) => m.text)).size).toBe(10);
+    expect(micros.some((m) => /feet.*calves|calves.*thighs/i.test(m.text))).toBe(false);
+    for (const micro of micros) {
+      expect(micro.title).toMatch(/^counted:body_scan:/);
+      expect(micro.pause_after_ms).toBeGreaterThanOrEqual(3_000);
+      expect(micro.pause_after_ms).toBeLessThanOrEqual(5_000);
+      expect(micro.text.split(/\s+/).length).toBeLessThanOrEqual(8);
+    }
+    expect(micros[0]?.text).toBe(BODY_SCAN_CUES.feet);
+    expect(micros.at(-1)?.text).toBe(BODY_SCAN_CUES.face);
+  });
+
   it("spokenCueForBeat returns null for pause beats", () => {
     expect(spokenCueForBeat({ kind: "pause", sec: 2 })).toBeNull();
     expect(spokenCueForBeat({ kind: "count", n: 7, sec: 2 })).toBe("Seven.");
     expect(spokenCueForBeat({ kind: "inhale", sec: 4 })).toBe("Breathe in.");
+    expect(spokenCueForBeat({ kind: "body_part", part: "feet", sec: 2 })).toBe(
+      BODY_SCAN_CUES.feet,
+    );
   });
 });
 
@@ -170,7 +189,66 @@ describe("spliceCountedSequenceSegments (v0.5-1.8)", () => {
     ]);
   });
 
-  it("gives model alpha most of the phase budget (countdown reserved only)", () => {
+  it("splices a paced body scan: one short cue per part with real inter-cue silence", () => {
+    const input = buildInput(15);
+    const draft = {
+      meta: { goal_version_id: input.goal_version_id },
+      segments: [
+        {
+          phase: "alpha",
+          step: null,
+          target_duration_sec: input.session.phase_budget_sec.alpha,
+          pause_after_ms: 500,
+          text: "Breathe at your own pace — in for about four, a soft hold for two, and a long exhale for eight.",
+        },
+      ],
+    };
+
+    const { manifest, actions } = spliceCountedSequenceSegments(draft, input);
+    const segments = (
+      manifest as {
+        segments: Array<{
+          phase: string;
+          text: string;
+          title?: string;
+          pause_after_ms: number;
+        }>;
+      }
+    ).segments;
+
+    const bodyScan = segments.filter((s) => s.title?.startsWith("counted:body_scan"));
+    expect(actions[0]).toContain("alpha_body_scan=");
+    expect(bodyScan.length).toBeGreaterThanOrEqual(8);
+    expect(bodyScan.length).toBeLessThanOrEqual(12);
+    // Not one run-on segment packing feet→face into a single breath.
+    expect(bodyScan.length).toBe(input.skeleton.counted_sequences.alpha_body_scan.count);
+
+    const parts = input.skeleton.counted_sequences.alpha_body_scan.beats.flatMap((b) =>
+      b.kind === "body_part" ? [b.part] : [],
+    );
+    expect(bodyScan.map((s) => s.text)).toEqual(parts.map((part) => BODY_SCAN_CUES[part]));
+
+    for (const cue of bodyScan) {
+      expect(cue.phase).toBe("alpha");
+      expect(cue.pause_after_ms).toBeGreaterThanOrEqual(3_000);
+      expect(cue.pause_after_ms).toBeLessThanOrEqual(5_000);
+      expect(cue.text.split(/\s+/).length).toBeLessThanOrEqual(8);
+      // One named area per cue — no packed lists.
+      const named = parts.filter((part) => {
+        const needle = part === "face" ? "face" : part;
+        return cue.text.toLowerCase().includes(needle);
+      });
+      expect(named.length).toBe(1);
+    }
+
+    const alpha = segments.filter((s) => s.phase === "alpha");
+    const firstScan = alpha.findIndex((s) => s.title?.startsWith("counted:body_scan"));
+    const firstCount = alpha.findIndex((s) => s.title?.startsWith("counted:countdown"));
+    expect(firstScan).toBeGreaterThan(0);
+    expect(firstCount).toBeGreaterThan(firstScan);
+  });
+
+  it("gives model alpha the remainder after body scan + countdown", () => {
     const input = buildInput(15);
     const draft = {
       meta: { goal_version_id: input.goal_version_id },
@@ -192,8 +270,12 @@ describe("spliceCountedSequenceSegments (v0.5-1.8)", () => {
       .filter((s) => s.phase === "alpha" && !s.title?.startsWith("counted:"))
       .reduce((sum, s) => sum + s.target_duration_sec, 0);
     const countdownSec = input.skeleton.counted_sequences.alpha_countdown.total_sec;
-    expect(modelAlphaSec).toBe(input.session.phase_budget_sec.alpha - countdownSec);
-    expect(modelAlphaSec).toBeGreaterThan(countdownSec);
+    const bodyScanSec = input.skeleton.counted_sequences.alpha_body_scan.total_sec;
+    expect(modelAlphaSec).toBe(
+      input.session.phase_budget_sec.alpha - countdownSec - bodyScanSec,
+    );
+    expect(modelAlphaSec).toBeGreaterThan(0);
+    expect(bodyScanSec).toBeGreaterThanOrEqual(60);
   });
 });
 

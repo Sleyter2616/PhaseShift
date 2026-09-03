@@ -33,7 +33,7 @@ Generation billing is the **two-pool minutes** model (`subscription_minutes` + `
 
 - Prompts are **immutable once versioned**.
 - Ship a new file (`src/lib/compiler/prompt.vN+1.ts`); never edit a shipped `prompt.vN.ts`.
-- Current default: **v2.0** (consumes server skeleton). Fallback: set `COMPILER_PROMPT_VERSION=v1.4`.
+- Current default: **v2.7** (consumes server skeleton). Fallback: set `COMPILER_PROMPT_VERSION=v1.4`.
 - Phase budgets, selected steps, and counted-sequence timings are computed in `src/lib/compiler/skeleton.ts` — do not move that authority into the model.
 
 ## Tests and CI

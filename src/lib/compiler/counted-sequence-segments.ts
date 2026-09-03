@@ -1,6 +1,7 @@
 import type { Manifest, ManifestSegment } from "../contracts/manifest";
 import type { CompilerInput } from "../session/derive";
 import {
+  BODY_SCAN_CUES,
   BREATH_CUES,
   type CountedBeat,
   type CountedSequence,
@@ -29,6 +30,7 @@ export function spokenCueForBeat(beat: CountedBeat): string | null {
   if (beat.kind === "inhale") return BREATH_CUES.inhale;
   if (beat.kind === "hold") return BREATH_CUES.hold;
   if (beat.kind === "exhale") return BREATH_CUES.exhale;
+  if (beat.kind === "body_part") return BODY_SCAN_CUES[beat.part];
   return null;
 }
 
@@ -60,18 +62,25 @@ export function expandCountedSequenceToMicroSegments(
     const text = spokenCueForBeat(beat);
     if (text == null) continue;
 
+    const title =
+      beat.kind === "body_part"
+        ? `counted:${sequence.kind}:${beat.part}`
+        : `counted:${sequence.kind}:${beat.kind}`;
+
     segments.push({
       seq: segments.length + 1, // renumbered by caller
       phase,
       step: null,
-      title: `counted:${sequence.kind}:${beat.kind}`,
+      title,
       perspective: "second" as const,
       temporal_horizon: null,
       archetype: null,
       pacing_wpm,
       // Budget slot equals the silent beat; cue speech is short and rides inside it.
+      // Body-part cues: pause_after_ms is ONLY the following pause beat (3–5s
+      // inter-cue silence), not the cue-slot itself — otherwise the scan rushes.
       target_duration_sec: beat.sec,
-      pause_after_ms: beat.sec * 1000,
+      pause_after_ms: beat.kind === "body_part" ? 0 : beat.sec * 1000,
       text,
     });
   }
@@ -105,7 +114,7 @@ function scalePhaseTargets(
 
 /**
  * Splice server-owned counted-sequence micro-segments into alpha/gamma.
- * Alpha: countdown only (breath is model-written self-paced instruction).
+ * Alpha: body scan + countdown (breath is model-written self-paced instruction).
  * Gamma: energizing + countup. Model content is rescaled around reserved budget.
  */
 export function spliceCountedSequenceSegments(
@@ -124,6 +133,11 @@ export function spliceCountedSequenceSegments(
 
   const existing = (raw.segments as unknown[]).filter(isRecord) as unknown as ManifestSegment[];
 
+  const alphaBodyScan = expandCountedSequenceToMicroSegments(
+    skeleton.counted_sequences.alpha_body_scan,
+    "alpha",
+    pacing.alpha_wpm,
+  );
   const alphaCountdown = expandCountedSequenceToMicroSegments(
     skeleton.counted_sequences.alpha_countdown,
     "alpha",
@@ -140,7 +154,9 @@ export function spliceCountedSequenceSegments(
     pacing.gamma_wpm,
   );
 
-  const reservedAlpha = skeleton.counted_sequences.alpha_countdown.total_sec;
+  const reservedAlpha =
+    skeleton.counted_sequences.alpha_body_scan.total_sec +
+    skeleton.counted_sequences.alpha_countdown.total_sec;
   const reservedGamma =
     skeleton.counted_sequences.gamma_energizing.total_sec +
     skeleton.counted_sequences.gamma_countup.total_sec;
@@ -197,6 +213,7 @@ export function spliceCountedSequenceSegments(
   const segments: ManifestSegment[] = [
     ...other.filter((s) => s.phase === "beta"),
     ...scaledAlpha,
+    ...alphaBodyScan,
     ...alphaCountdown,
     ...other.filter((s) => s.phase === "theta"),
     ...gammaEnergizing,
@@ -209,7 +226,7 @@ export function spliceCountedSequenceSegments(
   }));
 
   actions.push(
-    `spliced counted sequences: alpha_countdown=${alphaCountdown.length}, gamma_energizing=${gammaEnergizing.length}, gamma_countup=${gammaCountup.length}`,
+    `spliced counted sequences: alpha_body_scan=${alphaBodyScan.length}, alpha_countdown=${alphaCountdown.length}, gamma_energizing=${gammaEnergizing.length}, gamma_countup=${gammaCountup.length}`,
   );
 
   const manifest: Manifest = {

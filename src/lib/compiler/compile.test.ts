@@ -6,7 +6,7 @@ import {
   formatCompilerFailureMessage,
   PROMPT_VERSION,
 } from "./compile";
-import { COMPILER_PROMPT_V2_6 } from "./prompt.v2.6";
+import { COMPILER_PROMPT_V2_7 } from "./prompt.v2.7";
 import type { CompilerInput } from "../session/derive";
 import { DEFAULT_ENTRAINMENT_PLAN } from "../session/derive";
 
@@ -163,11 +163,11 @@ describe("compileManifest", () => {
     vi.unstubAllEnvs();
   });
 
-  it("defaults to prompt v2.6", () => {
-    expect(PROMPT_VERSION).toBe("v2.6");
+  it("defaults to prompt v2.7", () => {
+    expect(PROMPT_VERSION).toBe("v2.7");
   });
 
-  it("sends the v2.6 system prompt and skeleton in the user message", async () => {
+  it("sends the v2.7 system prompt and skeleton in the user message", async () => {
     const create = vi.fn().mockResolvedValue({
       stop_reason: "end_turn",
       usage: { input_tokens: 1, output_tokens: 1 },
@@ -182,7 +182,7 @@ describe("compileManifest", () => {
       system: string;
       messages: [{ content: string }];
     };
-    expect(firstCall.system).toBe(COMPILER_PROMPT_V2_6);
+    expect(firstCall.system).toBe(COMPILER_PROMPT_V2_7);
     const user = JSON.parse(firstCall.messages[0]!.content) as {
       skeleton: {
         length_min: number;
@@ -197,6 +197,7 @@ describe("compileManifest", () => {
     expect(user.skeleton.depth.density_factor).toBe(1);
     expect(user.skeleton.theta_steps[0]?.target_words).toBeGreaterThan(0);
     expect(user.skeleton.counted_sequences).not.toHaveProperty("alpha_breath");
+    expect(user.skeleton.counted_sequences).toHaveProperty("alpha_body_scan");
     expect(user.skeleton.counted_sequences).toHaveProperty("alpha_countdown");
   });
 
@@ -240,6 +241,15 @@ describe("compileManifest", () => {
 
       if (input.session.phase_budget_sec.beta === 0) {
         expect(manifest.segments.every((s) => s.phase !== "beta")).toBe(true);
+      }
+
+      const bodyScan = manifest.segments.filter((s) =>
+        s.title?.startsWith("counted:body_scan"),
+      );
+      expect(bodyScan.length).toBe(input.skeleton.counted_sequences.alpha_body_scan.count);
+      for (const cue of bodyScan) {
+        expect(cue.pause_after_ms).toBeGreaterThanOrEqual(3_000);
+        expect(cue.pause_after_ms).toBeLessThanOrEqual(5_000);
       }
     },
   );
