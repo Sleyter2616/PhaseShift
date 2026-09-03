@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  BODY_SCAN_CUES,
+  BODY_SCAN_INTER_CUE_PAUSE_MAX_SEC,
+  BODY_SCAN_INTER_CUE_PAUSE_MIN_SEC,
+  BODY_SCAN_PARTS,
   BOOKEND_END,
   BOOKEND_START,
   buildCountedSequence,
@@ -262,9 +266,10 @@ describe("buildSessionSkeleton defaults", () => {
     ).toBe(1800);
   });
 
-  it("omits alpha_breath; keeps server-led countdown", () => {
+  it("omits alpha_breath; keeps server-led body scan and countdown", () => {
     const skeleton = buildSessionSkeleton({ length_min: 15 });
     expect(skeleton.counted_sequences).not.toHaveProperty("alpha_breath");
+    expect(skeleton.counted_sequences.alpha_body_scan.kind).toBe("body_scan");
     expect(skeleton.counted_sequences.alpha_countdown.kind).toBe("countdown");
     expect(skeleton.counted_sequences.alpha_countdown.beats.some((b) => b.kind === "count")).toBe(
       true,
@@ -336,6 +341,56 @@ describe("v0.5-1.6 length-ladder calibration", () => {
       const labelSec = length * 60;
       expect(total).toBe(labelSec);
       expect(Math.abs(total - labelSec) / labelSec).toBeLessThanOrEqual(0.1);
+    }
+  });
+});
+
+describe("alpha body scan (v0.5-1.16)", () => {
+  it("paces 8–12 feet→face parts with 3–5s inter-cue pauses", () => {
+    for (const length of LENGTHS) {
+      const skeleton = buildSessionSkeleton({ length_min: length });
+      const scan = skeleton.counted_sequences.alpha_body_scan;
+      expect(scan.kind).toBe("body_scan");
+      expect(scan.count).toBeGreaterThanOrEqual(8);
+      expect(scan.count).toBeLessThanOrEqual(12);
+      expect(scan.total_sec).toBeGreaterThanOrEqual(60);
+      expect(scan.total_sec).toBeLessThan(
+        skeleton.phase_budget.alpha_sec - skeleton.counted_sequences.alpha_countdown.total_sec,
+      );
+
+      const partBeats = scan.beats.filter((b) => b.kind === "body_part");
+      const pauseBeats = scan.beats.filter((b) => b.kind === "pause");
+      expect(partBeats).toHaveLength(scan.count);
+      expect(pauseBeats).toHaveLength(scan.count);
+      expect(partBeats[0]).toMatchObject({ kind: "body_part", part: "feet" });
+      expect(partBeats.at(-1)).toMatchObject({ kind: "body_part", part: "face" });
+
+      for (const pause of pauseBeats) {
+        expect(pause.sec).toBeGreaterThanOrEqual(BODY_SCAN_INTER_CUE_PAUSE_MIN_SEC);
+        expect(pause.sec).toBeLessThanOrEqual(BODY_SCAN_INTER_CUE_PAUSE_MAX_SEC);
+      }
+    }
+  });
+
+  it("uses the 12-part list at 45 min", () => {
+    const skeleton = buildSessionSkeleton({ length_min: 45 });
+    const parts = skeleton.counted_sequences.alpha_body_scan.beats.flatMap((b) =>
+      b.kind === "body_part" ? [b.part] : [],
+    );
+    expect(parts).toEqual([...BODY_SCAN_PARTS]);
+  });
+
+  it("rejects a body-scan pause outside 3–5s", () => {
+    expect(() => buildCountedSequence("body_scan", 10, 20)).toThrow(/pause/);
+  });
+
+  it("has a short spoken cue for every part", () => {
+    for (const [part, cue] of Object.entries(BODY_SCAN_CUES)) {
+      expect(cue.split(/\s+/).length).toBeLessThanOrEqual(8);
+      expect(cue).toMatch(/[.]$/);
+      expect(cue.toLowerCase()).toContain(
+        part === "face" ? "face" : part === "arms" ? "arm" : part,
+      );
     }
   });
 });

@@ -172,6 +172,7 @@ export function formatCountedSequenceForPrompt(
   const beats = seq.beats
     .map((b) => {
       if (b.kind === "count") return `count ${b.n}=${b.sec}s`;
+      if (b.kind === "body_part") return `${b.part}=${b.sec}s`;
       return `${b.kind}=${b.sec}s`;
     })
     .join(", ");
@@ -201,6 +202,9 @@ export function formatSkeletonForPrompt(skeleton: SessionSkeleton): Record<strin
       target_words: timing.target_words,
     })),
     counted_sequences: {
+      alpha_body_scan: formatCountedSequenceForPrompt(
+        skeleton.counted_sequences.alpha_body_scan,
+      ),
       alpha_countdown: formatCountedSequenceForPrompt(
         skeleton.counted_sequences.alpha_countdown,
       ),

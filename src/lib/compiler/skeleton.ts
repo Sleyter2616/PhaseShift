@@ -104,14 +104,34 @@ export type DepthCalibration = {
   reflective_pauses: ReflectivePausePlan;
 };
 
-export type CountedSequenceKind = "breath" | "countdown" | "countup" | "energizing_breath";
+export type CountedSequenceKind =
+  | "breath"
+  | "countdown"
+  | "countup"
+  | "energizing_breath"
+  | "body_scan";
+
+export type BodyScanPart =
+  | "feet"
+  | "calves"
+  | "thighs"
+  | "hips"
+  | "belly"
+  | "back"
+  | "chest"
+  | "shoulders"
+  | "arms"
+  | "hands"
+  | "neck"
+  | "face";
 
 export type CountedBeat =
   | { kind: "inhale"; sec: number }
   | { kind: "hold"; sec: number }
   | { kind: "exhale"; sec: number }
   | { kind: "pause"; sec: number }
-  | { kind: "count"; n: number; sec: number };
+  | { kind: "count"; n: number; sec: number }
+  | { kind: "body_part"; part: BodyScanPart; sec: number };
 
 export type CountedSequence = {
   kind: CountedSequenceKind;
@@ -392,6 +412,100 @@ export const BREATH_CUES = {
 } as const;
 
 /**
+ * Progressive body scan — follow-along sequence (like countdown): one short
+ * cue per body part, then 3–5s of real silence to relax that area.
+ * Cue speech is a phrase; spacing is server-owned so the model cannot compress it.
+ */
+export const BODY_SCAN_CUE_SLOT_SEC = 2;
+export const BODY_SCAN_INTER_CUE_PAUSE_MIN_SEC = 3;
+export const BODY_SCAN_INTER_CUE_PAUSE_MAX_SEC = 5;
+/** Default inter-cue silence on short lengths (≤15). */
+export const BODY_SCAN_INTER_CUE_PAUSE_SEC = 4;
+
+/** Full feet→face list (45 min). */
+export const BODY_SCAN_PARTS = [
+  "feet",
+  "calves",
+  "thighs",
+  "hips",
+  "belly",
+  "back",
+  "chest",
+  "shoulders",
+  "arms",
+  "hands",
+  "neck",
+  "face",
+] as const satisfies readonly BodyScanPart[];
+
+/** Standard 10-part scan (10/15/30): skip back + hands, still feet→face. */
+export const BODY_SCAN_PARTS_STANDARD: readonly BodyScanPart[] = [
+  "feet",
+  "calves",
+  "thighs",
+  "hips",
+  "belly",
+  "chest",
+  "shoulders",
+  "arms",
+  "neck",
+  "face",
+];
+
+/** Compact 8-part scan if a caller requests count=8. */
+export const BODY_SCAN_PARTS_COMPACT: readonly BodyScanPart[] = [
+  "feet",
+  "calves",
+  "thighs",
+  "hips",
+  "belly",
+  "shoulders",
+  "arms",
+  "face",
+];
+
+export const BODY_SCAN_CUES: Record<BodyScanPart, string> = {
+  feet: "Let your feet soften and release.",
+  calves: "Now your calves.",
+  thighs: "Now your thighs.",
+  hips: "Now your hips.",
+  belly: "Now your belly.",
+  back: "Now your back.",
+  chest: "Now your chest.",
+  shoulders: "Now your shoulders.",
+  arms: "Now your arms.",
+  hands: "Now your hands.",
+  neck: "Now your neck.",
+  face: "Now your jaw and face.",
+};
+
+export function bodyScanPartsForCount(count: number): readonly BodyScanPart[] {
+  if (count === BODY_SCAN_PARTS.length) return BODY_SCAN_PARTS;
+  if (count === BODY_SCAN_PARTS_STANDARD.length) return BODY_SCAN_PARTS_STANDARD;
+  if (count === BODY_SCAN_PARTS_COMPACT.length) return BODY_SCAN_PARTS_COMPACT;
+  throw new SkeletonValidationError(
+    `body_scan count ${count} must be 8, 10, or 12 (feet→face)`,
+  );
+}
+
+export function bodyScanPartCount(lengthMin: SessionLengthMin): number {
+  return lengthMin === 45 ? BODY_SCAN_PARTS.length : BODY_SCAN_PARTS_STANDARD.length;
+}
+
+export function bodyScanInterCuePauseSec(lengthMin: SessionLengthMin): number {
+  return lengthMin >= STANDARD_FULL_ARC_MIN
+    ? BODY_SCAN_INTER_CUE_PAUSE_MAX_SEC
+    : BODY_SCAN_INTER_CUE_PAUSE_SEC;
+}
+
+export function bodyScanTotalSec(lengthMin: SessionLengthMin): number {
+  return (
+    bodyScanPartCount(lengthMin) *
+    (BODY_SCAN_CUE_SLOT_SEC + bodyScanInterCuePauseSec(lengthMin))
+  );
+}
+
+/**
  * Reject physically impossible breath patterns: inhale without a following
  * exhale before the next inhale, and holds over the kind-specific cap.
  */
@@ -437,8 +551,9 @@ export function validateBreathBeats(
  * pacing cannot be compressed by the model.
  *
  * Alpha breath is NOT spliced (self-paced instruction in model content).
+ * Alpha body scan IS spliced (one cue per part + 3–5s silence).
  * `breath` kind remains for tests / legacy builders; production skeleton
- * uses countdown + gamma sequences only.
+ * uses body_scan + countdown + gamma sequences.
  */
 export function buildCountedSequence(
   kind: CountedSequenceKind,
@@ -453,6 +568,51 @@ export function buildCountedSequence(
   }
 
   const beats: CountedBeat[] = [];
+
+  if (kind === "body_scan") {
+    const parts = bodyScanPartsForCount(count);
+    const cueEach = BODY_SCAN_CUE_SLOT_SEC;
+    const pausePool = totalSec - parts.length * cueEach;
+    const basePause = Math.floor(pausePool / parts.length);
+    let remainder = pausePool - basePause * parts.length;
+
+    if (basePause < BODY_SCAN_INTER_CUE_PAUSE_MIN_SEC) {
+      throw new SkeletonValidationError(
+        `body_scan pause ${basePause}s below min ${BODY_SCAN_INTER_CUE_PAUSE_MIN_SEC}s`,
+      );
+    }
+    if (basePause > BODY_SCAN_INTER_CUE_PAUSE_MAX_SEC) {
+      throw new SkeletonValidationError(
+        `body_scan pause ${basePause}s exceeds max ${BODY_SCAN_INTER_CUE_PAUSE_MAX_SEC}s`,
+      );
+    }
+    if (remainder > 0 && basePause + 1 > BODY_SCAN_INTER_CUE_PAUSE_MAX_SEC) {
+      throw new SkeletonValidationError(
+        `body_scan cannot distribute ${totalSec}s without exceeding ${BODY_SCAN_INTER_CUE_PAUSE_MAX_SEC}s inter-cue pause`,
+      );
+    }
+
+    for (const part of parts) {
+      const pauseSec = basePause + (remainder > 0 ? 1 : 0);
+      if (remainder > 0) remainder -= 1;
+      beats.push({ kind: "body_part", part, sec: cueEach });
+      beats.push({ kind: "pause", sec: pauseSec });
+    }
+
+    const sum = beats.reduce((acc, b) => acc + b.sec, 0);
+    if (sum !== totalSec) {
+      throw new SkeletonValidationError(
+        `body_scan timing could not sum to ${totalSec}s (got ${sum})`,
+      );
+    }
+
+    return {
+      kind,
+      count: parts.length,
+      total_sec: totalSec,
+      beats,
+    };
+  }
 
   if (kind === "breath") {
     const maxCycles = Math.max(1, Math.floor(totalSec / BREATH_CYCLE_SEC));
@@ -547,6 +707,8 @@ export type SessionSkeleton = {
   theta_steps: ThetaStepTiming[];
   depth: DepthCalibration;
   counted_sequences: {
+    /** Server-paced feet→face scan: one cue per part + 3–5s silence. */
+    alpha_body_scan: CountedSequence;
     /** Server-led numbers-only countdown; breath is model-instructed self-pace. */
     alpha_countdown: CountedSequence;
     gamma_energizing: CountedSequence;
@@ -577,9 +739,16 @@ export function buildSessionSkeleton(input: {
   const theta_steps = distributeThetaTime(phase_budget.theta_sec, steps);
   const depth = buildDepthCalibration(length_min, steps.length);
 
-  // Countdown stays server-led (~25% of alpha). Breath is no longer spliced —
-  // the model fills the remaining alpha budget with self-paced instruction + flow.
+  // Countdown stays server-led (~25% of alpha). Body scan is also server-paced
+  // (one cue per part + 3–5s silence). Breath is not spliced — the model fills
+  // the remaining alpha budget with self-paced instruction + imagery.
   const alphaCountdownSec = Math.max(20, Math.floor(phase_budget.alpha_sec * 0.25));
+  const alphaBodyScanSec = bodyScanTotalSec(length_min);
+  if (alphaCountdownSec + alphaBodyScanSec >= phase_budget.alpha_sec) {
+    throw new SkeletonValidationError(
+      `alpha body scan ${alphaBodyScanSec}s + countdown ${alphaCountdownSec}s leaves no model alpha (budget ${phase_budget.alpha_sec}s)`,
+    );
+  }
   const gammaEnergizingSec = Math.max(30, Math.floor(phase_budget.gamma_sec * 0.5));
   const gammaCountupSec = Math.max(15, Math.floor(phase_budget.gamma_sec * 0.25));
 
@@ -591,6 +760,11 @@ export function buildSessionSkeleton(input: {
     theta_steps,
     depth,
     counted_sequences: {
+      alpha_body_scan: buildCountedSequence(
+        "body_scan",
+        bodyScanPartCount(length_min),
+        alphaBodyScanSec,
+      ),
       alpha_countdown: buildCountedSequence("countdown", 10, alphaCountdownSec),
       gamma_energizing: buildCountedSequence("energizing_breath", 3, gammaEnergizingSec),
       gamma_countup: buildCountedSequence("countup", 5, gammaCountupSec),

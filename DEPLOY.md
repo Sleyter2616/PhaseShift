@@ -29,7 +29,7 @@ Set these on the Vercel project (**Production**). Leave secrets empty in git; ne
 | `STRIPE_PRICE_PRACT` | Live Price ID for Practitioner subscription |
 | `WELCOME_GRANT_ENABLED` | Set to **`1`** to grant new users topup minutes when they complete `/welcome`; anything else (or unset) = off. Flip + redeploy to disable — no code change. |
 | `WELCOME_GRANT_MINUTES` | Optional; integer minutes for the welcome topup (default **400**) |
-| `COMPILER_PROMPT_VERSION` | Optional; default `v2.5`. Pin an older immutable prompt if needed |
+| `COMPILER_PROMPT_VERSION` | Optional; default `v2.7`. Pin an older immutable prompt if needed |
 | `SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN` | Optional error tracking. Client events tunnel via same-origin **`/monitoring`** (`tunnelRoute` in `next.config.ts`) so ad-blockers cannot CORS-block ingest. |
 
 **Do not set in production:**

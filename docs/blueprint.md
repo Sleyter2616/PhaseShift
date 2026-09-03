@@ -35,7 +35,7 @@ POST /api/scripts
       v
 Inngest job: generate-script  (route maxDuration=300s; soft compile budget ~270s)
       |
-      |-- step: compile-attempt-1 — Claude compile (prompt **v2.6** default + intake +
+      |-- step: compile-attempt-1 — Claude compile (prompt **v2.7** default + intake +
       |          skeleton givens; pin older via COMPILER_PROMPT_VERSION; v1.4 fallback)
       |          Soft-budget timeout → schedule **compile-attempt-1-retry** as its **own**
       |          Inngest step (fresh 300s ceiling). Fail only if the retry also times out.
@@ -464,11 +464,12 @@ When `beta` budget is `0` (10-minute sessions), omit beta segments entirely and 
 
 ### 2.2 Compiler prompts (versioned, immutable)
 
-Prompts live in `src/lib/compiler/prompt.vN.ts`. **Once shipped, a version is immutable** — add `prompt.vN+1.ts` instead of editing. Default today: **v2.6** (`resolveCompilerPromptVersion` in `compile.ts`).
+Prompts live in `src/lib/compiler/prompt.vN.ts`. **Once shipped, a version is immutable** — add `prompt.vN+1.ts` instead of editing. Default today: **v2.7** (`resolveCompilerPromptVersion` in `compile.ts`).
 
 | Version | Role |
 | ------- | ---- |
-| **v2.6** (default) | Unhurried opening (beta + early alpha before body scan). |
+| **v2.7** (default) | Server-paced alpha body scan (one cue per body part + 3–5s silence). |
+| **v2.6** | Unhurried opening (beta + early alpha before body scan). |
 | **v2.5** | Person-aware intake embeds (`my→your` in second-person guidance) + pre-synth script-qa. |
 | **v2.4** | Hard word-budget minimums so content aims at labeled duration (underwrite gate at 97%). |
 | **v2.3** | Self-paced breath: state 4/2/8/2 **once**, then guide over the user's own pacing (no live cueing). |
@@ -477,14 +478,14 @@ Prompts live in `src/lib/compiler/prompt.vN.ts`. **Once shipped, a version is im
 | **v2.0** | Skeleton as GIVENS: phase budgets, selected steps, posture, counted-sequence tables. |
 | **v1.4** | Legacy full-arc prompt. Fallback via `COMPILER_PROMPT_VERSION=v1.4`. |
 
-Authoritative text: `src/lib/compiler/prompt.v2.6.ts` (and prior immutable files). Do not paste divergent copies into this blueprint.
+Authoritative text: `src/lib/compiler/prompt.v2.7.ts` (and prior immutable files). Do not paste divergent copies into this blueprint.
 
 **Structural rules (v2.x summary):**
 
 1. Phase order beta → alpha → theta → gamma; **skip beta when `beta_sec = 0`**.
 2. Theta contains **only** `skeleton.steps` (bookended 1 + 12), in order; ≥1 segment per listed step.
 3. Per-phase sums of `target_duration_sec` equal skeleton / `session.phase_budget_sec` exactly.
-4. **Self-paced breathing (v2.3+):** the session tells the 4/2/8/2 pattern once, then continues over the user's own pacing — **not** live inhale/hold/exhale cueing. Alpha countdown = **numbers only into silence** (server-spliced micro-segments). Gamma energizing breaths / count-ups remain server-timed counted sequences.
+4. **Self-paced breathing (v2.3+):** the session tells the 4/2/8/2 pattern once, then continues over the user's own pacing — **not** live inhale/hold/exhale cueing. **Progressive body scan (v2.7+):** server-spliced micro-segments — one short cue per body part (feet→face) with **3–5s of real silence** between so the listener can follow. Alpha countdown = **numbers only into silence** (server-spliced micro-segments). Gamma energizing breaths / count-ups remain server-timed counted sequences.
 5. Present tense in theta; banned modal verbs; person-aware verbatim intake; ≥20% break time in alpha/theta; WPM ceilings as soft budgets; hard `target_words` minimums (v2.4+).
 6. **Session content QA:** after compile, `script-qa` fixes person-agreement slips and flags broken scripts before synthesis.
 
@@ -520,7 +521,7 @@ Actual per-length table (seconds; sums = `length_min × 60`):
 
 **Posture** (`sitting` default | `lying`): does **not** change durations. It **does** change body-reference language in the prompt (sitting vs lying cues for orientation, theta depth, and gamma intensity).
 
-**Counted sequences:** server owns timings via `buildCountedSequence` / splice helpers. Alpha **breath is not spliced** (model writes one self-paced instruction). Alpha **countdown** and gamma energizing/count-up are server-spliced micro-segments (numbers into silence / timed beats). Gamma energizing cycles are always inhale → hold → exhale → pause. The model must not invent competing live breath cues.
+**Counted sequences:** server owns timings via `buildCountedSequence` / splice helpers. Alpha **breath is not spliced** (model writes one self-paced instruction). Alpha **body scan** is server-spliced: 8–12 short cues (feet→face), each followed by 3–5s `pause_after_ms` so the scan is followable — not a run-on list. Alpha **countdown** and gamma energizing/count-up are server-spliced micro-segments (numbers into silence / timed beats). Gamma energizing cycles are always inhale → hold → exhale → pause. The model must not invent competing live breath cues or a packed body-scan list. Body-scan pauses are intentional (not dwelling padding); session length still lands via theta dwelling reconcile.
 
 **Exact session length.** Phase budgets sum to `length_min × 60` exactly. After synthesis, wall-clock length is forced to the budgeted total by **distributed theta dwelling silence** (`reconcileSessionLength` in `src/lib/schedule/reconcile.ts`) — delivered length equals labeled length within tolerance. Billing always charges the **exact budgeted** `length_min × voice_multiplier`, not measured speech time.
 
@@ -696,7 +697,7 @@ Capacity planning still tracks ElevenLabs character spend separately from user-f
 
 **v0.5 — Customizable Protocol (current):**
 
-- **v0.5-1 (landed through ~1.14 breath/pace):** Server-owned skeleton; length ladder 10/15/30/45; step model B; posture; self-paced breath; gamma energizing = full inhale/hold/exhale cycles; opening pace slower (beta 100 / alpha 78 + settle pauses); exact length via theta dwelling; fail-open compile-attempt-2 as its own Inngest step; soft-timeout → one separate-step compile retry (~270s soft / 300s maxDuration); person-agreement script-qa; tone mix cap; prompt **v2.6**; minutes = budgeted length × voice multiplier; welcome grant (env toggle); stuck-generation reaper cron.
+- **v0.5-1 (landed through ~1.16 body scan):** Server-owned skeleton; length ladder 10/15/30/45; step model B; posture; self-paced breath; **paced alpha body scan** (one cue per part + 3–5s silence); gamma energizing = full inhale/hold/exhale cycles; opening pace slower (beta 100 / alpha 78 + settle pauses); exact length via theta dwelling; fail-open compile-attempt-2 as its own Inngest step; soft-timeout → one separate-step compile retry (~270s soft / 300s maxDuration); person-agreement script-qa; tone mix cap; prompt **v2.7**; minutes = budgeted length × voice multiplier; welcome grant (env toggle); stuck-generation reaper cron.
 - **Wizard length + reuse (landed):** length picker + prior-session answer reuse. Contiguous middle-step picker UI still deferred (API ready).
 - **First-session primer (landed):** one-time how-to gate before first playback (`primer_seen_at`); revisit via `/how-to`.
 - Later v0.5: Recognition Log / re-triangulate polish; regen copy-through mode (D8).
