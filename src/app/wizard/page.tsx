@@ -11,6 +11,11 @@ import type { WizardDraft } from "@/lib/contracts/wizard";
 import { createClient } from "@/lib/supabase/server";
 import { pickBestVoiceProfile } from "@/lib/voice/profile-select";
 import { stockVoiceOptionsFromEnv } from "@/lib/voice/stock-voices";
+import {
+  displaySubscriptionResetAt,
+  isSubscriptionResetStale,
+  maybeReconcileStaleSubscriptionResetForUser,
+} from "@/lib/billing/reconcile-subscription-reset";
 import { WizardFlow } from "./wizard-flow";
 
 export default async function WizardPage({
@@ -24,7 +29,7 @@ export default async function WizardPage({
   const { from: fromScriptId } = await searchParams;
 
   const supabase = await createClient();
-  const [{ data: voiceRows }, { data: profile }, { data: priorRows }] = await Promise.all([
+  const [{ data: voiceRows }, { data: profileRow }, { data: priorRows }] = await Promise.all([
     supabase
       .from("voice_profiles")
       .select("id, status, provider_voice_id, consent_confirmed_at")
@@ -40,6 +45,17 @@ export default async function WizardPage({
       .order("created_at", { ascending: false })
       .limit(20),
   ]);
+
+  let profile = profileRow;
+  if (isSubscriptionResetStale(profile?.subscription_minutes_reset_at)) {
+    await maybeReconcileStaleSubscriptionResetForUser(user.id);
+    const { data: refreshed } = await supabase
+      .from("profiles")
+      .select("subscription_minutes, topup_minutes, subscription_minutes_reset_at")
+      .eq("id", user.id)
+      .maybeSingle();
+    profile = refreshed ?? profile;
+  }
 
   const voice = pickBestVoiceProfile(voiceRows);
   const readyVoiceProfileId = voice.readyId;
@@ -85,7 +101,7 @@ export default async function WizardPage({
           minutesBalance={{
             subscription: Number(profile?.subscription_minutes ?? 0),
             topup: Number(profile?.topup_minutes ?? 0),
-            resetAt: profile?.subscription_minutes_reset_at ?? null,
+            resetAt: displaySubscriptionResetAt(profile?.subscription_minutes_reset_at),
           }}
           priorSessions={priorSessions}
           priorDrafts={priorDrafts}

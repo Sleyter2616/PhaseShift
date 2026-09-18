@@ -16,7 +16,7 @@ See the full execution plan in [`docs/blueprint.md`](docs/blueprint.md). Agent o
 - **Session content QA:** pre-synthesis person-agreement fix (`my→your`) and broken-script block.
 - **Fail-open compile:** underwrite expand runs as a separate Inngest step (never hangs the main compile).
 - **Stuck-generation reaper:** Inngest cron every 5 min marks hard-killed `generating` scripts failed and refunds minutes idempotently.
-- **Minutes billing:** two-pool — subscription (monthly) + top-up (never expire); cost = `length_min ×` stock `1×` / own-voice `2×`. Optional **welcome grant** (`WELCOME_GRANT_ENABLED=1`) credits new users once on onboarding.
+- **Minutes billing:** two-pool — subscription (monthly) + top-up (never expire); cost = `length_min ×` stock `1×` / own-voice `2×`. Optional **welcome grant** (`WELCOME_GRANT_ENABLED=1`) credits new users once on onboarding. Stale subscription reset dates are reconciled against Stripe (on-read + hourly cron); only paid-active subs refresh.
 - **Tone mix:** entrainment bed capped well below voice (`TONE_GAIN_MAX=0.15`).
 - **Posture:** sitting (default) | lying — affects body-reference language.
 - **Sentry** error tracking for the App Router (`@sentry/nextjs`).
@@ -36,7 +36,7 @@ See the full execution plan in [`docs/blueprint.md`](docs/blueprint.md). Agent o
 
 - Node.js ≥ 22 (`nvm use`)
 - pnpm 9+
-- Hosted Supabase project with migrations through `0013_primer_seen_at.sql` applied (conductor applies migrations — see `AGENTS.md`)
+- Hosted Supabase project with migrations through `0015_subscription_reset_idempotent.sql` applied (conductor applies migrations — see `AGENTS.md`)
 - [Anthropic API key](https://console.anthropic.com/)
 - [ElevenLabs API key](https://elevenlabs.io/) (optional when `TTS_PROVIDER=selfhost`)
 - [Inngest dev server](https://www.inngest.com/docs/local-development)
@@ -188,12 +188,12 @@ src/
   app/wizard/             7-step intake wizard
   app/session/[scriptId]/ Player
   lib/compiler/           skeleton.ts, prompt.v2.7.ts (+ immutable v2.x / v1.x), script-qa, compile
-  lib/billing/            minutes.ts (two-pool), welcome-grant, Stripe helpers
+  lib/billing/            minutes.ts (two-pool), welcome-grant, subscription-reset reconcile, Stripe helpers
   lib/contracts/          intake + manifest Zod
   lib/sentry/             capture helpers
-  inngest/functions/      generate-script, synthesize-segment, stuck-generation-reaper
+  inngest/functions/      generate-script, synthesize-segment, reconcile-subscription-resets
 scripts/                  seed, verify, minutes-concurrency
-supabase/migrations/      0001–0013
+supabase/migrations/      0001–0015
 AGENTS.md                 Coding-agent operating rules
 ```
 
