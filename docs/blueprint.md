@@ -523,7 +523,7 @@ Actual per-length table (seconds; sums = `length_min × 60`):
 
 **Counted sequences:** server owns timings via `buildCountedSequence` / splice helpers. Alpha **breath is not spliced** (model writes one self-paced instruction). Alpha **body scan** is server-spliced: 8–12 short cues (feet→face), each followed by 3–5s `pause_after_ms` so the scan is followable — not a run-on list. Alpha **countdown** and gamma energizing/count-up are server-spliced micro-segments (numbers into silence / timed beats). Gamma energizing cycles are always inhale → hold → exhale → pause. The model must not invent competing live breath cues or a packed body-scan list. Body-scan pauses are intentional (not dwelling padding); session length still lands via theta dwelling reconcile.
 
-**Exact session length.** Phase budgets sum to `length_min × 60` exactly. After synthesis, wall-clock length is forced to the budgeted total by **distributed theta dwelling silence** (`reconcileSessionLength` in `src/lib/schedule/reconcile.ts`) — delivered length equals labeled length within tolerance. Billing always charges the **exact budgeted** `length_min × voice_multiplier`, not measured speech time.
+**Exact session length.** Phase budgets sum to `length_min × 60` exactly. After synthesis, wall-clock length is forced to the budgeted total by **distributed theta dwelling silence** (`reconcileLengthToTarget` in `src/lib/schedule/reconcile.ts`, up to **60s per theta slot**) plus slower default TTS (`DEFAULT_VOICE_SETTINGS.speed = 0.85`, unhurried vs ElevenLabs conversational 1.0). Delivered length equals labeled length within **3%** (29–31 min for a 30-min session). Changing `speed` / `voice_settings` changes the audio `dedupe_key` — cached segments regenerate. Billing always charges the **exact budgeted** `length_min × voice_multiplier`, not measured speech time.
 
 **Compile step budgets.** `/api/inngest` sets `maxDuration = 300`. Each compile runs in its own Inngest step with a soft budget of **`COMPILE_STEP_BUDGET_MS` ≈ 270s** (~30s headroom before the hard kill). Compiles log `duration_ms` / `length_min` / `outcome` so long-session latency (especially 45-min) is observable; accept that long sessions may need the timeout retry rather than failing early.
 
@@ -565,7 +565,7 @@ for (const phase of phases) {
   // targeted text compression/regeneration. Never create negative pauses.
 }
 
-// Then: distribute remaining shortfall as theta dwelling pauses (capped per slot)
+// Then: distribute remaining shortfall as theta dwelling pauses (≤60s per slot)
 // so total wall clock ≈ sum(phase_budget_sec) = length_min × 60.
 ```
 
@@ -699,7 +699,7 @@ Capacity planning still tracks ElevenLabs character spend separately from user-f
 
 **v0.5 — Customizable Protocol (current):**
 
-- **v0.5-1 (landed through ~1.16 body scan):** Server-owned skeleton; length ladder 10/15/30/45; step model B; posture; self-paced breath; **paced alpha body scan** (one cue per part + 3–5s silence); gamma energizing = full inhale/hold/exhale cycles; opening pace slower (beta 100 / alpha 78 + settle pauses); exact length via theta dwelling; fail-open compile-attempt-2 as its own Inngest step; soft-timeout → one separate-step compile retry (~270s soft / 300s maxDuration); person-agreement script-qa; tone mix cap; prompt **v2.7**; minutes = budgeted length × voice multiplier; welcome grant (env toggle); stuck-generation reaper cron.
+- **v0.5-1 (landed through ~1.17 voice speed):** Server-owned skeleton; length ladder 10/15/30/45; step model B; posture; self-paced breath; **paced alpha body scan** (one cue per part + 3–5s silence); gamma energizing = full inhale/hold/exhale cycles; opening pace slower (beta 100 / alpha 78 + settle pauses); **TTS `speed` 0.85** (calm delivery from line one; cache miss expected); exact length via theta dwelling (**60s/slot**) + slower speech; fail-open compile-attempt-2 as its own Inngest step; soft-timeout → one separate-step compile retry (~270s soft / 300s maxDuration); person-agreement script-qa; tone mix cap; prompt **v2.7**; minutes = budgeted length × voice multiplier; welcome grant (env toggle); stuck-generation reaper cron.
 - **Wizard length + reuse (landed):** length picker + prior-session answer reuse. Contiguous middle-step picker UI still deferred (API ready).
 - **First-session primer (landed):** one-time how-to gate before first playback (`primer_seen_at`); revisit via `/how-to`.
 - Later v0.5: Recognition Log / re-triangulate polish; regen copy-through mode (D8).

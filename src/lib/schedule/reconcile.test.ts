@@ -6,7 +6,11 @@ import {
   reconcileLengthToTarget,
   reconcilePhaseTiming,
 } from "./reconcile";
-import { LENGTHS, buildSessionSkeleton } from "../compiler/skeleton";
+import { LENGTHS, buildSessionSkeleton, type SessionLengthMin } from "../compiler/skeleton";
+import {
+  DEFAULT_VOICE_SPEED,
+  scaleSpeechDurationForVoiceSpeed,
+} from "../pipeline/synthesis-identity";
 
 describe("reconcilePhaseTiming", () => {
   it("respects intended pauses without inflating slack", () => {
@@ -189,6 +193,69 @@ describe("reconcileLengthToTarget", () => {
         segments,
       });
 
+      expect(result.withinTolerance).toBe(true);
+      expect(Math.abs(result.totalSec - target) / target).toBeLessThanOrEqual(
+        LENGTH_TOLERANCE_RATIO + 1e-6,
+      );
+    },
+  );
+
+  /**
+   * Live bug: ElevenLabs at speed 1.0 delivered ~25 min for a 30-min label
+   * (~60% voiced seconds; 30s theta dwelling could not close ~5 min).
+   * Slower default TTS stretches speech; 60s dwelling absorbs the rest.
+   */
+  function segmentsForFastTtsUnderwrite(lengthMin: SessionLengthMin) {
+    const skeleton = buildSessionSkeleton({ length_min: lengthMin });
+    const target = lengthMin * 60;
+    const budget = {
+      beta: skeleton.phase_budget.beta_sec,
+      alpha: skeleton.phase_budget.alpha_sec,
+      theta: skeleton.phase_budget.theta_sec,
+      gamma: skeleton.phase_budget.gamma_sec,
+    };
+    const speech = scaleSpeechDurationForVoiceSpeed(target * 0.6, DEFAULT_VOICE_SPEED);
+    const thetaN = Math.max(1, skeleton.steps.length);
+    const perTheta = (speech * 0.7) / thetaN;
+    const segments = [
+      ...(budget.beta > 0
+        ? [{ phase: "beta" as const, pause_after_ms: 500, actual_duration_sec: speech * 0.05 }]
+        : []),
+      { phase: "alpha" as const, pause_after_ms: 5000, actual_duration_sec: speech * 0.1 },
+      ...skeleton.steps.map(() => ({
+        phase: "theta" as const,
+        pause_after_ms: 4000,
+        actual_duration_sec: perTheta,
+      })),
+      { phase: "gamma" as const, pause_after_ms: 2000, actual_duration_sec: speech * 0.15 },
+    ];
+    return { target, budget, segments };
+  }
+
+  it("lands a 30-min session within 3% of 1800s after slower TTS + dwelling", () => {
+    const { target, budget, segments } = segmentsForFastTtsUnderwrite(30);
+    expect(target).toBe(1800);
+
+    const result = reconcileLengthToTarget({
+      targetTotalSec: target,
+      phaseBudgetSec: budget,
+      segments,
+    });
+
+    expect(result.withinTolerance).toBe(true);
+    expect(result.totalSec).toBeGreaterThanOrEqual(target * (1 - LENGTH_TOLERANCE_RATIO));
+    expect(result.totalSec).toBeLessThanOrEqual(target * (1 + LENGTH_TOLERANCE_RATIO));
+  });
+
+  it.each([15, 30, 45] as const)(
+    "lands %s-min within 3%% of label after meditation TTS speed (was ~83%% at speed 1.0)",
+    (lengthMin) => {
+      const { target, budget, segments } = segmentsForFastTtsUnderwrite(lengthMin);
+      const result = reconcileLengthToTarget({
+        targetTotalSec: target,
+        phaseBudgetSec: budget,
+        segments,
+      });
       expect(result.withinTolerance).toBe(true);
       expect(Math.abs(result.totalSec - target) / target).toBeLessThanOrEqual(
         LENGTH_TOLERANCE_RATIO + 1e-6,
