@@ -8,7 +8,7 @@ See the full execution plan in [`docs/blueprint.md`](docs/blueprint.md). Agent o
 
 ## Features (current)
 
-- **Variable session lengths:** 10 / 15 / 30 / 45 minutes (40 retired). Phase budgets are **server-computed** and sum to `length × 60`; delivered length matches via distributed theta dwelling silence. Billing = exact budgeted length × voice multiplier.
+- **Variable session lengths:** 10 / 15 / 30 / 45 minutes (40 retired). Phase budgets are **server-computed** and sum to `length × 60`; delivered length matches via slower default TTS (`speed` 0.85) plus distributed theta dwelling silence (up to 60s/slot). Billing = exact budgeted length × voice multiplier.
 - **First-session primer:** calm how-to once before first playback; revisit via **How to use** (`/how-to`).
 - **Step model B:** Visualize (1) + Closure (12) bookends; contiguous middle steps from 2..11, count capped by length. Wizard length picker + prior-session reuse; middle-step picker UI still deferred.
 - **Self-paced breathing:** session states the 4/2/8/2 pattern once, then guides over the user's own pacing (not live breath cueing). Progressive body scan = one short cue per body part with 3–5s silence (server-spliced). Countdown = numbers only into silence.
@@ -20,7 +20,7 @@ See the full execution plan in [`docs/blueprint.md`](docs/blueprint.md). Agent o
 - **Tone mix:** entrainment bed capped well below voice (`TONE_GAIN_MAX=0.15`).
 - **Posture:** sitting (default) | lying — affects body-reference language.
 - **Sentry** error tracking for the App Router (`@sentry/nextjs`).
-- Per-segment ElevenLabs TTS with content-hash dedupe; client-side binaural/isochronic entrainment; Inngest generation pipeline.
+- Per-segment ElevenLabs TTS with content-hash dedupe and default `speed` 0.85 (calm meditation pace); client-side binaural/isochronic entrainment; Inngest generation pipeline.
 
 ## Stack
 

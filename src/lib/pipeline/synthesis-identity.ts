@@ -23,10 +23,27 @@ export interface ScriptVoiceSource {
 export const DEFAULT_ELEVENLABS_MODEL_ID = "eleven_flash_v2_5";
 export const DEFAULT_CLONE_ELEVENLABS_MODEL_ID = "eleven_multilingual_v2";
 
+/**
+ * ElevenLabs `voice_settings.speed` range is ~0.7–1.2 (1.0 = conversational).
+ * Meditation delivery is unhurried from the first line — independent of
+ * inter-segment pauses. Changing this invalidates `dedupe_key` (settings hash).
+ */
+export const DEFAULT_VOICE_SPEED = 0.85;
+
 export const DEFAULT_VOICE_SETTINGS: Record<string, unknown> = {
   stability: 0.5,
   similarity_boost: 0.75,
+  speed: DEFAULT_VOICE_SPEED,
 };
+
+/** Stretch speech seconds to match TTS speed (lower speed → longer audio). */
+export function scaleSpeechDurationForVoiceSpeed(
+  durationSec: number,
+  speed: number = DEFAULT_VOICE_SPEED,
+): number {
+  if (!(speed > 0) || !Number.isFinite(speed)) return durationSec;
+  return durationSec / speed;
+}
 
 export function defaultTtsModelId(): string {
   return process.env.ELEVENLABS_MODEL_ID ?? DEFAULT_ELEVENLABS_MODEL_ID;

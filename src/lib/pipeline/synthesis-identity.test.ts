@@ -4,8 +4,11 @@ import {
   defaultTtsModelIdForScript,
   DEFAULT_CLONE_ELEVENLABS_MODEL_ID,
   DEFAULT_ELEVENLABS_MODEL_ID,
+  DEFAULT_VOICE_SETTINGS,
+  DEFAULT_VOICE_SPEED,
   loadScriptSynthesisIdentity,
   resolveSynthesisIdentity,
+  scaleSpeechDurationForVoiceSpeed,
 } from "./synthesis-identity";
 
 const PROFILE_ROW_UUID = "a1b2c3d4-e5f6-4a78-9abc-def012345678";
@@ -85,6 +88,7 @@ describe("resolveSynthesisIdentity", () => {
 
     expect(identity.assetScope).toBe("shared");
     expect(identity.voiceId).toBe("stock-voice-abc");
+    expect(identity.settings.speed).toBe(DEFAULT_VOICE_SPEED);
     expect(buildStoragePath(identity, "audio-1")).toBe("shared/stock-voice-abc/audio-1.mp3");
   });
 
@@ -113,6 +117,22 @@ describe("resolveSynthesisIdentity", () => {
         tts_model_id: "eleven_flash_v2_5",
       }),
     ).toThrow(/provider_voice_id/);
+  });
+});
+
+describe("DEFAULT_VOICE_SETTINGS", () => {
+  it("sets an explicit meditation speed slower than conversational 1.0", () => {
+    expect(DEFAULT_VOICE_SPEED).toBeLessThan(1);
+    expect(DEFAULT_VOICE_SPEED).toBeGreaterThanOrEqual(0.7);
+    expect(DEFAULT_VOICE_SPEED).toBeLessThanOrEqual(1.2);
+    expect(DEFAULT_VOICE_SETTINGS.speed).toBe(DEFAULT_VOICE_SPEED);
+    expect(DEFAULT_VOICE_SETTINGS.stability).toBe(0.5);
+    expect(DEFAULT_VOICE_SETTINGS.similarity_boost).toBe(0.75);
+  });
+
+  it("scales speech duration inversely with speed", () => {
+    expect(scaleSpeechDurationForVoiceSpeed(85, 0.85)).toBeCloseTo(100, 5);
+    expect(scaleSpeechDurationForVoiceSpeed(100, 1)).toBe(100);
   });
 });
 

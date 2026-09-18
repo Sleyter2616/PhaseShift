@@ -7,8 +7,12 @@ export type PhaseKey = (typeof PHASES)[number];
  */
 export const MAX_SCHEDULED_PAUSE_MS = 10_000;
 
-/** Contemplative dwelling pauses in theta only (length reconciliation). */
-export const MAX_THETA_DWELLING_PAUSE_MS = 30_000;
+/**
+ * Contemplative dwelling pauses in theta only (length reconciliation).
+ * 60s/slot gives 12 theta steps enough headroom to close a ~5 min content
+ * gap after slower TTS; still spread across many slots, never one dump.
+ */
+export const MAX_THETA_DWELLING_PAUSE_MS = 60_000;
 
 /** Final wall clock must land within this fraction of the label. */
 export const LENGTH_TOLERANCE_RATIO = 0.03;
@@ -147,8 +151,9 @@ function trimSmallestPauses(segments: ReconcileSegment[], overageMs: number): vo
  * then adjust so speech + pauses land within tolerance of targetTotalSec.
  *
  * Shortfall → theta dwelling silence only (spread across many slots, each
- * ≤ MAX_THETA_DWELLING_PAUSE_MS). Overage → trim smallest pauses first.
- * beta/alpha/gamma never exceed MAX_SCHEDULED_PAUSE_MS (~10s).
+ * ≤ MAX_THETA_DWELLING_PAUSE_MS). Combined with slower default TTS speed
+ * (~0.85), this closes multi-minute content gaps. Overage → trim smallest
+ * pauses first. beta/alpha/gamma never exceed MAX_SCHEDULED_PAUSE_MS (~10s).
  */
 export function reconcileLengthToTarget(input: {
   targetTotalSec: number;
