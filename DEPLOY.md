@@ -59,7 +59,7 @@ Apply migrations through `0015_subscription_reset_idempotent.sql` on the prod da
 1. Deploy the Next.js app so `/api/inngest` is reachable.
 2. Prefer the [Inngest Vercel integration](https://www.inngest.com/docs/deploy/vercel) (sets `INNGEST_EVENT_KEY` / `INNGEST_SIGNING_KEY` and syncs on deploy), **or** create an app in the Inngest dashboard and paste the keys into Vercel manually.
 3. Confirm the serve URL is `https://phaseshift.app/api/inngest` (or set `INNGEST_SERVE_ORIGIN`).
-4. Sync / deploy once and verify functions `generate-script`, `synthesize-segment`, and `reconcile-subscription-resets` (hourly cron; Stripe-verified fallback when `invoice.paid` is missed) appear in the Inngest UI.
+4. Sync / deploy once and verify functions `generate-script`, `synthesize-segment`, `reconcile-subscription-resets` (hourly cron; Stripe-verified fallback when `invoice.paid` is missed), and `stuck-script-reaper` (every 5 min) appear in the Inngest UI.
 
 Local reminder: use `INNGEST_DEV=1` and `npx inngest-cli@latest dev -u http://localhost:3000/api/inngest` — never point local at prod keys.
 

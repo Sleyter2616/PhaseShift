@@ -15,7 +15,7 @@ See the full execution plan in [`docs/blueprint.md`](docs/blueprint.md). Agent o
 - **Compiler prompt v2.7** (default): skeleton givens, depth-by-length, self-paced breath, paced body scan, word-budget minimums, person-aware intake, unhurried opening. Pin older via `COMPILER_PROMPT_VERSION` (incl. `v1.4`).
 - **Session content QA:** pre-synthesis person-agreement fix (`my→your`) and broken-script block.
 - **Fail-open compile:** underwrite expand runs as a separate Inngest step (never hangs the main compile).
-- **Stuck-generation reaper:** Inngest cron every 5 min marks hard-killed `generating` scripts failed and refunds minutes idempotently.
+- **Stuck-generation reaper:** Inngest cron every 5 min marks hard-killed `generating` scripts failed and refunds minutes; `synthesizing` scripts with a dropped segment are retried (fail+refund only after 2 retriggers).
 - **Minutes billing:** two-pool — subscription (monthly) + top-up (never expire); cost = `length_min ×` stock `1×` / own-voice `2×`. Optional **welcome grant** (`WELCOME_GRANT_ENABLED=1`) credits new users once on onboarding. Stale subscription reset dates are reconciled against Stripe (on-read + hourly cron); only paid-active subs refresh.
 - **Tone mix:** entrainment bed capped well below voice (`TONE_GAIN_MAX=0.15`).
 - **Posture:** sitting (default) | lying — affects body-reference language.

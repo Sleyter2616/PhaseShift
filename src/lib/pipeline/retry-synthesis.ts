@@ -1,7 +1,6 @@
 import type { ServiceClient } from "@/lib/db/service-client";
-import type { CompilerInput } from "@/lib/session/derive";
 import { applyDedupeHits, linkPendingSegmentsFromAudioCache, planSegmentDedupe } from "./dedupe-plan";
-import { reconcileSegments } from "./reconcile-persist";
+import { finalizeSynthesizedScript, phaseBudgetFromCompilerInput } from "./finalize-script";
 import { segmentContentHash } from "./segment-rows";
 import { runSynthesizeSegment } from "./synthesize-segment-job";
 import {
@@ -28,11 +27,7 @@ export async function retryFailedScriptSynthesis(
     throw new Error(`script status must be failed (got ${script.status})`);
   }
 
-  const compilerInput = script.compiler_input as CompilerInput | null;
-  const phaseBudget = compilerInput?.session?.phase_budget_sec;
-  if (!phaseBudget) {
-    throw new Error("compiler_input.phase_budget_sec missing");
-  }
+  const phaseBudget = phaseBudgetFromCompilerInput(script.compiler_input);
 
   const synthesisIdentity = await loadScriptSynthesisIdentity(
     supabase,
@@ -117,47 +112,7 @@ export async function retryFailedScriptSynthesis(
     scriptId,
   );
 
-  const { data: synthSegments, error: synthError } = await supabase
-    .from("script_segments")
-    .select("id, phase, pause_after_ms, actual_duration_sec, seq")
-    .eq("script_id", scriptId)
-    .order("seq");
-
-  if (synthError) {
-    throw new Error(synthError.message);
-  }
-
-  const { updates, overBudgetPhases, totalSec, targetTotalSec, withinTolerance } =
-    reconcileSegments(synthSegments ?? [], phaseBudget);
-  for (const update of updates) {
-    const { error } = await supabase
-      .from("script_segments")
-      .update({ scheduled_pause_after_ms: update.scheduled_pause_after_ms })
-      .eq("id", update.id);
-    if (error) {
-      throw new Error(`reconcile update failed: ${error.message}`);
-    }
-  }
-
-  const totalDurationSec = Math.round(totalSec);
-
-  let overageWarning: string | null = null;
-  if (overBudgetPhases.length > 0) {
-    overageWarning = `OVERAGE: phases ${overBudgetPhases.join(",")} exceed voiced budget by >2%`;
-  }
-  if (!withinTolerance) {
-    const lengthWarn = `LENGTH: reconciled ${totalSec.toFixed(1)}s vs target ${targetTotalSec}s`;
-    overageWarning = overageWarning ? `${overageWarning}; ${lengthWarn}` : lengthWarn;
-  }
-
-  await supabase
-    .from("scripts")
-    .update({
-      status: "ready",
-      total_duration_sec: totalDurationSec,
-      error_message: overageWarning,
-    })
-    .eq("id", scriptId);
+  await finalizeSynthesizedScript(supabase, scriptId, phaseBudget);
 
   return { hits: plan.hits.length, misses: plan.misses.length, status: "ready" };
 }

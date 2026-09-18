@@ -61,9 +61,10 @@ Inngest job: generate-script  (route maxDuration=300s; soft compile budget ~270s
       |-- step: reconcile wall-clock length (theta dwelling silence → exact budget)
       |-- step: mark script ready
       v
-Inngest cron (every 5 min): stuck-generation-reaper
-      |  scripts stuck status=generating >10 min with 0 ready segments
-      |  → mark failed + idempotent minutes refund
+Inngest cron (every 5 min): stuck-script-reaper
+      |  generating >10 min + 0 ready segments → fail + refund
+      |  synthesizing >10 min + pending/processing/failed segments → re-enqueue those jobs
+      |  (2 retriggers then fail + refund). Dropped TTS jobs must not hang at pending.
       v
 Supabase Realtime -> client (progressive: playback can start once beta+alpha are ready;
                               theta finishes synthesizing during the induction)
@@ -629,7 +630,7 @@ Onboard (/welcome) -> optional welcome topup -> Intake wizard -> generation
 | ------------------ | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Next.js app + PWA  | Vercel           | Service worker via serwist; cache manifest + audio segments for offline sessions                                                                                                                                                                 |
 | API routes         | Vercel functions | Thin: validate intake, build skeleton, spend minutes, insert rows, enqueue job, return script_id                                                                                                                                                 |
-| LLM + TTS work     | Inngest          | Long-running generation; concurrency capped to the ElevenLabs plan; **stuck-generation-reaper** cron every 5 min refunds hard-killed zombies                                                                                                                                 |
+| LLM + TTS work     | Inngest          | Long-running generation; concurrency capped to the ElevenLabs plan; **stuck-script-reaper** cron every 5 min retries dropped synthesis jobs, then refunds true zombies                                                                                                                                 |
 | Auth, DB, Realtime | Supabase         | Email/password. **Signup confirm** and **password reset** both use `/auth/callback` (PKCE `exchangeCodeForSession`), distinguished by `next`: confirm → bare `/auth/callback` → `/welcome` or `/scripts` (logged in, no password step); reset → `/auth/callback?next=/reset-password` → `/reset-password` + recovery cookie, then `updateUser({ password })`. Mis-targeted `/?code=` forwards to `/auth/callback` (not reset). Canonical origin `NEXT_PUBLIC_APP_URL` (`https://phaseshift.app` in prod). |
 | Audio storage      | Supabase Storage | Private bucket, signed URLs, Smart CDN; user voice assets under `{user_id}/...`, shared stock assets under `shared/...`; TTL defaults to 24h and service worker refreshes signed URLs before expiry; body caching makes repeat plays zero-egress |
 | Billing            | Stripe           | Subscriptions + minute top-ups; webhooks call `grant_subscription_minutes` / `grant_topup_minutes` via service role. Optional **welcome grant** (env-toggled) credits topup on first onboarding.                                              |
@@ -668,7 +669,11 @@ Examples: 10-min stock = **10**; 45-min own voice = **90**.
 
 **Subscription reset.** `invoice.paid` is the source of truth for monthly refresh (`grant_subscription_minutes` + `subscription_minutes_reset_at` = period end). If that webhook is missed/delayed, `subscription_minutes_reset_at` can go stale (a past date, minutes not refreshed). Fallback: on billing/wizard/script reads, and an hourly Inngest cron (`reconcile-subscription-resets`), profiles with a past `reset_at` are checked against Stripe. **Only `status=active` (paid) subscriptions are granted** — same RPC as the webhook. Canceled / past_due / unverifiable customers get the stale date cleared (never a complimentary refill). UI never displays a past reset date as the next refresh.
 
-**Stuck-generation reaper.** Hard kills (Vercel timeout / crash) can leave scripts at `status=generating` forever and leak spent minutes (the failure-refund path only runs on caught errors). An Inngest cron every **5 minutes** finds scripts stuck generating **>10 minutes** with **0 ready segments**, marks them `failed` with a clear reason, and **refunds** spent minutes idempotently (skips if a `refund` ledger row already exists for that script).
+**Stuck-script reaper.** Hard kills (Vercel timeout / crash) can leave scripts at `status=generating` forever and leak spent minutes (the failure-refund path only runs on caught errors). An Inngest cron every **5 minutes** (`stuck-script-reaper`):
+
+- **Generating:** scripts stuck `generating` **>10 minutes** with **0 ready segments** are marked `failed` and **refunded** (idempotent via `minutes_ledger` refund rows).
+- **Synthesizing:** scripts stuck `synthesizing` **>10 minutes** with segments still `pending` / `processing` / `failed` get those jobs **re-enqueued** (`script/synthesize-segment`). Prefer recovering the dropped segment (52/53 ready stays usable). After **2** retriggers still stuck → fail + refund. If every segment is already ready, the reaper finalizes to `ready` (parent generate-script died after TTS).
+- A synthesis job that errors **must** mark its segment `failed` (never leave `pending`). `generate-script` uses `Promise.allSettled` for the TTS fan-out and, once status is `synthesizing`, does **not** fail the whole script on a dropped/errored child — the reaper retries.
 
 **Welcome grant (friends / demo).** When `WELCOME_GRANT_ENABLED=1`, a new user completing `/welcome` (`completeOnboarding`, `onboarded_at` null→set) receives a one-time `grant_topup_minutes` of `WELCOME_GRANT_MINUTES` (default **400**) into the **topup** pool. Idempotent: onboarded_at transition + ledger check. Flip the env var + redeploy to disable — no code change.
 
@@ -699,7 +704,7 @@ Capacity planning still tracks ElevenLabs character spend separately from user-f
 
 **v0.5 — Customizable Protocol (current):**
 
-- **v0.5-1 (landed through ~1.17 voice speed):** Server-owned skeleton; length ladder 10/15/30/45; step model B; posture; self-paced breath; **paced alpha body scan** (one cue per part + 3–5s silence); gamma energizing = full inhale/hold/exhale cycles; opening pace slower (beta 100 / alpha 78 + settle pauses); **TTS `speed` 0.85** (calm delivery from line one; cache miss expected); exact length via theta dwelling (**60s/slot**) + slower speech; fail-open compile-attempt-2 as its own Inngest step; soft-timeout → one separate-step compile retry (~270s soft / 300s maxDuration); person-agreement script-qa; tone mix cap; prompt **v2.7**; minutes = budgeted length × voice multiplier; welcome grant (env toggle); stuck-generation reaper cron.
+- **v0.5-1 (landed through ~1.17 voice speed + synthesis reaper):** Server-owned skeleton; length ladder 10/15/30/45; step model B; posture; self-paced breath; **paced alpha body scan** (one cue per part + 3–5s silence); gamma energizing = full inhale/hold/exhale cycles; opening pace slower (beta 100 / alpha 78 + settle pauses); **TTS `speed` 0.85** (calm delivery from line one; cache miss expected); exact length via theta dwelling (**60s/slot**) + slower speech; fail-open compile-attempt-2 as its own Inngest step; soft-timeout → one separate-step compile retry (~270s soft / 300s maxDuration); person-agreement script-qa; tone mix cap; prompt **v2.7**; minutes = budgeted length × voice multiplier; welcome grant (env toggle); **stuck-script-reaper** (retry dropped TTS jobs; fail+refund after 2 retriggers).
 - **Wizard length + reuse (landed):** length picker + prior-session answer reuse. Contiguous middle-step picker UI still deferred (API ready).
 - **First-session primer (landed):** one-time how-to gate before first playback (`primer_seen_at`); revisit via `/how-to`.
 - Later v0.5: Recognition Log / re-triangulate polish; regen copy-through mode (D8).
