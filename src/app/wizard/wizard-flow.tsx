@@ -68,7 +68,7 @@ type InsufficientPayload = {
 };
 
 function formatResetDate(iso: string | null): string {
-  if (!iso) return "—";
+  if (!iso) return "each billing cycle when subscribed";
   return new Date(iso).toLocaleDateString();
 }
 

@@ -70,7 +70,7 @@ export async function grantSubscriptionMinutesForUser(
   if (error) throw new Error(error.message);
 }
 
-function subscriptionTierFromItems(
+export function subscriptionTierFromItems(
   subscription: Stripe.Subscription,
 ): MinutesTierId | null {
   const priceId = subscription.items.data[0]?.price?.id;
@@ -78,7 +78,7 @@ function subscriptionTierFromItems(
   return tierForStripePriceId(priceId);
 }
 
-function subscriptionPeriodEnd(subscription: Stripe.Subscription): number | null {
+export function subscriptionPeriodEnd(subscription: Stripe.Subscription): number | null {
   const fromItem = subscription.items?.data?.[0]?.current_period_end;
   if (typeof fromItem === "number") return fromItem;
   const legacy = (subscription as { current_period_end?: number }).current_period_end;
@@ -202,6 +202,9 @@ export async function handleStripeWebhookEvent(ctx: StripeWebhookContext): Promi
       break;
     }
     case "invoice.paid": {
+      // Source of truth for paid renewals. Missed/delayed events are recovered
+      // by reconcileStaleSubscriptionReset (on-read + hourly cron) after Stripe
+      // confirms status=active — never a complimentary grant for lapsed subs.
       const invoice = event.data.object as Stripe.Invoice;
       if (!invoiceSubscriptionId(invoice)) break;
       const customerId =

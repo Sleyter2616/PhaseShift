@@ -10,6 +10,7 @@ import {
   normalizeSpendRpcResult,
   refundMinutesBreakdown,
 } from "@/lib/billing/refund-minutes";
+import { maybeReconcileStaleSubscriptionResetForUser } from "@/lib/billing/reconcile-subscription-reset";
 import { createScriptBodySchema } from "@/lib/contracts/intake";
 import { PROMPT_VERSION } from "@/lib/compiler/compile";
 import { getServiceClient } from "@/lib/db/service-client";
@@ -101,6 +102,8 @@ export async function POST(request: Request) {
     const sessionLengthMin = intake.session.duration_min;
     const generationCost = minutesCost(sessionLengthMin, isOwnVoice);
     const ttsModelId = defaultTtsModelIdForScript(voiceProfileId);
+
+    await maybeReconcileStaleSubscriptionResetForUser(userId);
 
     const { data: poolsRow } = await supabase
       .from("profiles")

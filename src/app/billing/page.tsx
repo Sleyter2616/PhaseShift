@@ -2,6 +2,11 @@ import { redirect } from "next/navigation";
 import { SetupHeader } from "@/components/setup-header";
 import { SiteFooter } from "@/components/site-footer";
 import { MINUTE_TIERS } from "@/lib/billing/minutes";
+import {
+  displaySubscriptionResetAt,
+  isSubscriptionResetStale,
+  maybeReconcileStaleSubscriptionResetForUser,
+} from "@/lib/billing/reconcile-subscription-reset";
 import { getSessionUser } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { BillingActions } from "./billing-actions";
@@ -16,13 +21,30 @@ export default async function BillingPage() {
   if (!user) redirect("/login");
 
   const supabase = await createClient();
-  const { data: profile, error } = await supabase
+  const initial = await supabase
     .from("profiles")
     .select(
       "subscription_minutes, topup_minutes, subscription_minutes_reset_at, subscription_status, subscription_tier, subscription_current_period_end",
     )
     .eq("id", user.id)
     .single();
+
+  let profile = initial.data;
+  const error = initial.error;
+
+  if (!error && isSubscriptionResetStale(profile?.subscription_minutes_reset_at)) {
+    await maybeReconcileStaleSubscriptionResetForUser(user.id);
+    const refreshed = await supabase
+      .from("profiles")
+      .select(
+        "subscription_minutes, topup_minutes, subscription_minutes_reset_at, subscription_status, subscription_tier, subscription_current_period_end",
+      )
+      .eq("id", user.id)
+      .single();
+    if (!refreshed.error && refreshed.data) {
+      profile = refreshed.data;
+    }
+  }
 
   if (error) {
     return (
@@ -43,6 +65,7 @@ export default async function BillingPage() {
 
   const subscriptionMinutes = Number(profile?.subscription_minutes ?? 0);
   const topupMinutes = Number(profile?.topup_minutes ?? 0);
+  const resetAtDisplay = displaySubscriptionResetAt(profile?.subscription_minutes_reset_at);
 
   return (
     <div className="setup-ground flex min-h-dvh flex-col">
@@ -73,8 +96,8 @@ export default async function BillingPage() {
             </div>
           </dl>
           <p className="mt-3 text-sm text-[var(--text-mid)]">
-            {profile?.subscription_minutes_reset_at
-              ? `Subscription minutes reset ${formatPeriodEnd(profile.subscription_minutes_reset_at)}.`
+            {resetAtDisplay
+              ? `Subscription minutes reset ${formatPeriodEnd(resetAtDisplay)}.`
               : "Subscription minutes reset each billing cycle when subscribed."}{" "}
             Top-up minutes never expire.
           </p>

@@ -646,7 +646,7 @@ Move to AWS/GCP only when one of these appears: server-side mixing (ffmpeg pipel
 
 ### Two-pool minutes model (current)
 
-Generation is metered in **minutes**, not credits. Source of truth: `src/lib/billing/minutes.ts` + `supabase/migrations/0012_minutes.sql`.
+Generation is metered in **minutes**, not credits. Source of truth: `src/lib/billing/minutes.ts` + `supabase/migrations/0012_minutes.sql` (idempotent same-period grant in `0015_subscription_reset_idempotent.sql`).
 
 | Pool | Column | Behavior |
 | ---- | ------ | -------- |
@@ -664,7 +664,9 @@ voice_multiplier: stock = 1×, own_voice = 2×
 
 Examples: 10-min stock = **10**; 45-min own voice = **90**.
 
-**SQL surface:** `minutes_cost`, `spend_minutes`, `refund_minutes`, `grant_subscription_minutes`, `grant_topup_minutes`, table `minutes_ledger`.
+**SQL surface:** `minutes_cost`, `spend_minutes`, `refund_minutes`, `grant_subscription_minutes`, `grant_topup_minutes`, table `minutes_ledger`. `grant_subscription_minutes` is idempotent for the same `p_period_end` (does not refill a spent cycle).
+
+**Subscription reset.** `invoice.paid` is the source of truth for monthly refresh (`grant_subscription_minutes` + `subscription_minutes_reset_at` = period end). If that webhook is missed/delayed, `subscription_minutes_reset_at` can go stale (a past date, minutes not refreshed). Fallback: on billing/wizard/script reads, and an hourly Inngest cron (`reconcile-subscription-resets`), profiles with a past `reset_at` are checked against Stripe. **Only `status=active` (paid) subscriptions are granted** — same RPC as the webhook. Canceled / past_due / unverifiable customers get the stale date cleared (never a complimentary refill). UI never displays a past reset date as the next refresh.
 
 **Stuck-generation reaper.** Hard kills (Vercel timeout / crash) can leave scripts at `status=generating` forever and leak spent minutes (the failure-refund path only runs on caught errors). An Inngest cron every **5 minutes** finds scripts stuck generating **>10 minutes** with **0 ready segments**, marks them `failed` with a clear reason, and **refunds** spent minutes idempotently (skips if a `refund` ledger row already exists for that script).
 
