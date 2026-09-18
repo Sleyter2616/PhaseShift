@@ -102,7 +102,38 @@ export async function insertAudioFileOrFetchExisting(
   };
 }
 
+/** Mark a segment failed so it is retriable — never leave it pending after an error. */
+export async function markSegmentSynthesisFailed(
+  supabase: ServiceClient,
+  scriptId: string,
+  segmentId: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from("script_segments")
+    .update({ synthesis_status: "failed" })
+    .eq("id", segmentId)
+    .eq("script_id", scriptId)
+    .neq("synthesis_status", "ready");
+  if (error) {
+    console.error(
+      `markSegmentSynthesisFailed: ${error.message} script=${scriptId} segment=${segmentId}`,
+    );
+  }
+}
+
 export async function runSynthesizeSegment(
+  supabase: ServiceClient,
+  input: SynthesizeSegmentInput,
+): Promise<{ audio_file_id: string; duration_sec: number }> {
+  try {
+    return await runSynthesizeSegmentUnchecked(supabase, input);
+  } catch (error) {
+    await markSegmentSynthesisFailed(supabase, input.script_id, input.segment_id);
+    throw error;
+  }
+}
+
+async function runSynthesizeSegmentUnchecked(
   supabase: ServiceClient,
   input: SynthesizeSegmentInput,
 ): Promise<{ audio_file_id: string; duration_sec: number }> {

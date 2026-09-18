@@ -17,8 +17,9 @@ import {
 } from "@/lib/pipeline/compile-timeout-retry";
 import { applyDedupeHits, linkPendingSegmentsFromAudioCache, planSegmentDedupe } from "@/lib/pipeline/dedupe-plan";
 import { deriveSegmentRows } from "@/lib/pipeline/segment-rows";
-import { reconcileSegments } from "@/lib/pipeline/reconcile-persist";
+import { finalizeSynthesizedScript } from "@/lib/pipeline/finalize-script";
 import { markScriptFailed } from "@/lib/pipeline/mark-script-failed";
+import { shouldLeaveForSynthesisReaper } from "@/lib/pipeline/reap-stuck-scripts";
 import {
   loadScriptSynthesisIdentity,
   type ScriptVoiceSource,
@@ -183,7 +184,7 @@ export const generateScript = inngest.createFunction(
         const textBySegmentId = new Map(segments.map((segment) => [segment.id, segment.text]));
         const ordered = [...segments].sort((a, b) => a.seq - b.seq);
 
-        await Promise.all(
+        await Promise.allSettled(
           dedupe.misses.map((miss, index) => {
             const orderedIndex = ordered.findIndex((segment) => segment.id === miss.segmentId);
             const previousText =
@@ -219,66 +220,29 @@ export const generateScript = inngest.createFunction(
         );
       });
 
-      const reconcileResult = await step.run("reconcile", async () => {
+      const incomplete = await step.run("check-synthesis-complete", async () => {
         const supabase = getServiceClient();
-        const { data: synthSegments, error } = await supabase
+        const { data, error } = await supabase
           .from("script_segments")
-          .select("id, phase, pause_after_ms, actual_duration_sec, seq")
-          .eq("script_id", scriptId)
-          .order("seq");
-
+          .select("synthesis_status")
+          .eq("script_id", scriptId);
         if (error) throw new Error(error.message);
-
-        const phaseBudget = scriptCtx.compiler_input.session.phase_budget_sec;
-        const { updates, overBudgetPhases, totalSec, targetTotalSec, withinTolerance } =
-          reconcileSegments(synthSegments ?? [], phaseBudget);
-
-        for (const update of updates) {
-          await supabase
-            .from("script_segments")
-            .update({ scheduled_pause_after_ms: update.scheduled_pause_after_ms })
-            .eq("id", update.id);
-        }
-
-        let overageWarning: string | null = null;
-        if (overBudgetPhases.length > 0) {
-          overageWarning = `OVERAGE: phases ${overBudgetPhases.join(",")} exceed voiced budget by >2%`;
-        }
-        if (!withinTolerance) {
-          const lengthWarn = `LENGTH: reconciled ${totalSec.toFixed(1)}s vs target ${targetTotalSec}s`;
-          overageWarning = overageWarning ? `${overageWarning}; ${lengthWarn}` : lengthWarn;
-        }
-
-        return { overageWarning };
+        return (data ?? []).some((row) => row.synthesis_status !== "ready");
       });
 
-      await step.run("finalize", async () => {
-        const supabase = getServiceClient();
-        const { data: finalSegments, error } = await supabase
-          .from("script_segments")
-          .select("actual_duration_sec, scheduled_pause_after_ms")
-          .eq("script_id", scriptId);
-
-        if (error) throw new Error(error.message);
-
-        const totalDurationSec = Math.round(
-          (finalSegments ?? []).reduce(
-            (sum, row) =>
-              sum +
-              Number(row.actual_duration_sec ?? 0) +
-              Number(row.scheduled_pause_after_ms ?? 0) / 1000,
-            0,
-          ),
+      if (incomplete) {
+        console.error(
+          "generate-script: segments still not ready after fan-out; leaving synthesizing for reaper",
         );
+        return { script_id: scriptId, status: "synthesizing", incomplete: true };
+      }
 
-        await supabase
-          .from("scripts")
-          .update({
-            status: "ready",
-            total_duration_sec: totalDurationSec,
-            error_message: reconcileResult.overageWarning,
-          })
-          .eq("id", scriptId);
+      await step.run("reconcile-and-finalize", async () => {
+        await finalizeSynthesizedScript(
+          getServiceClient(),
+          scriptId,
+          scriptCtx.compiler_input.session.phase_budget_sec,
+        );
       });
 
       return { script_id: scriptId, status: "ready" };
@@ -290,6 +254,23 @@ export const generateScript = inngest.createFunction(
           : error instanceof Error
             ? error.message
             : "unknown error";
+
+      const scriptStatus = await step.run("load-status-on-error", async () => {
+        const supabase = getServiceClient();
+        const { data } = await supabase
+          .from("scripts")
+          .select("status")
+          .eq("id", scriptId)
+          .maybeSingle();
+        return data?.status ?? "generating";
+      });
+
+      if (shouldLeaveForSynthesisReaper(scriptStatus)) {
+        console.error(
+          `generate-script: synthesis-phase error (${message}); leaving synthesizing for reaper`,
+        );
+        return { script_id: scriptId, status: "synthesizing", incomplete: true };
+      }
 
       await step.run("mark-failed", async () => {
         await markScriptFailed(scriptId, message);
